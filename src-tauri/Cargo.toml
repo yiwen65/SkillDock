@@ -1,0 +1,29 @@
+[package]
+name = "skills-collection-app"
+version = "0.1.0"
+description = "Desktop manager for a local skills collection workspace"
+edition = "2021"
+
+[lib]
+name = "skills_collection_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+desktop = [
+  "dep:tauri",
+  "tauri/wry",
+  "tauri/compression",
+  "tauri/common-controls-v6",
+  "tauri/dynamic-acl",
+  "tauri/x11",
+  "tauri/dbus",
+]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", default-features = false, features = [], optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
