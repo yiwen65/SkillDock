@@ -1,7 +1,8 @@
 <div align="center">
   <img src="public/app-icon.png" alt="SkillDock" width="128" height="128" />
   <h1>SkillDock</h1>
-  <p><strong>本地优先的 agent skills / plugins / tools 收藏夹管理器</strong></p>
+  <p><strong>A local-first manager for your agent skills, plugins, and tools collection</strong></p>
+  <p><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></p>
   <p>
     <img src="https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri" alt="Tauri 2" />
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React 18" />
@@ -14,144 +15,144 @@
 
 ---
 
-SkillDock 把一组 `git clone` 来的 agent 相关仓库（skills、plugins、tools、design resources）集中到一个 **workspace**，用图形界面完成导入、更新检查、`SKILL.md` 预览、以及向 Claude Code / Codex / 自定义 agent 的软链接安装和卸载。它是此前 `scripts/link-skill.sh`、`scripts/list-skills.sh`、`scripts/sync-projects.sh` 三个 shell 工具的 UI 封装与统一抽象。
+SkillDock gathers a set of `git clone`-d agent-related repositories (skills, plugins, tools, design resources) into a single **workspace**, and gives you a GUI to import, check updates, preview `SKILL.md` files, and symlink skills into Claude Code, Codex, or any custom agent's skills directory. It is the UI and unified abstraction over what used to be three shell scripts: `scripts/link-skill.sh`, `scripts/list-skills.sh`, and `scripts/sync-projects.sh`.
 
-## 界面预览
+## Screenshot
 
-![SkillDock Skills 视图](docs/images/skills-view.png)
+![SkillDock Skills view](docs/images/skills-view.png)
 
-Skills 视图：左侧导航、顶部 workspace 概览（Projects / Skills / Agents / Installs），中部是带搜索与过滤的 skill 列表，右侧是选中 skill 的安装目标面板，可单独或批量软链接到已配置的 agent 目录。
+Skills view: left-hand navigation, workspace stats at the top (Projects / Skills / Agents / Installs), a searchable and filterable skill list in the middle, and a right-hand detail panel for installing the selected skill — individually or in batch — into any configured agent.
 
-## 核心能力
+## Core Capabilities
 
-- **Workspace 管理** —— 选择并记住一个 collection 根目录，启动时扫描顶层 Git 仓库与 `SKILL.md`。
-- **Git 导入与更新** —— 支持 `owner/repo`、HTTPS、SSH、`git@...` 等任意 Git URL；显式“检查更新”后使用 `git pull --ff-only --prune`，默认跳过 dirty 工作区。
-- **Skill 扫描与预览** —— 解析 `SKILL.md` frontmatter、来源项目、相对路径、assets / scripts / references 标记与当前安装状态。
-- **Agent Profiles** —— 内置 Claude Code (`~/.claude/skills`) 和 Codex (`~/.codex/skills`)，支持自定义 agent；可一键创建缺失目录。
-- **安全软链接** —— 默认链接名 `<repo>-<skill>` 避免冲突；单个与批量安装均先生成冲突预览，不覆盖真实文件或真实目录。
-- **安全卸载** —— 只移除指向当前 workspace 内 skill 的 symlink，从不触碰外部路径、真实文件或源项目。
-- **串行任务队列 & 日志** —— Git、FS、agent 目录是共享资源，任务默认串行执行，可在 Tasks / Logs 视图查看 stdout / stderr。
+- **Workspace management** — pick and remember one collection root; scan top-level Git repos and `SKILL.md` files at startup.
+- **Git import & update** — accept `owner/repo`, HTTPS, SSH, `git@...`, and arbitrary Git URLs; explicit "Check updates" runs `git pull --ff-only --prune` and skips dirty working trees by default.
+- **Skill scanning & preview** — parse `SKILL.md` frontmatter, source project, relative path, assets / scripts / references markers, and current install status.
+- **Agent profiles** — ship with Claude Code (`~/.claude/skills`) and Codex (`~/.codex/skills`) built-in; custom agents and one-click creation of missing target directories are supported.
+- **Safe symlink install** — default link name `<repo>-<skill>` avoids collisions; single and batch installs always generate a conflict preview and never overwrite real files or real directories.
+- **Safe uninstall** — removes only symlinks that point into the current workspace; external paths, real files, and source projects are never touched.
+- **Serial task queue & logs** — Git, FS, and agent directories are shared resources, so tasks run serially by default; full stdout / stderr is visible in the Tasks / Logs view.
 
-设计上刻意 **不做** 的事：GitHub 搜索 / 推荐市场、skill 编辑器、后台守护、实时 file watcher、删除本地项目目录、分支切换、完整 Markdown 渲染器。详见 [docs/skilldock.md](docs/skilldock.md) 的“非目标”。
+Deliberate **non-goals**: GitHub search / recommendation marketplace, skill editor, background daemon, real-time file watcher, deleting local project directories, branch switching, full Markdown renderer. See the design doc for details.
 
-## 技术栈
+## Tech Stack
 
-| 层 | 选型 |
-| -- | ---- |
-| 壳 | [Tauri 2](https://tauri.app/) |
-| 前端 | React 18 + TypeScript + Vite 5 |
-| 后端 | Rust（Tauri commands）|
-| Git | 直接调用系统 `git`，**不** 绑定 libgit2 |
-| 测试 | Playwright（E2E）+ `cargo test`（Rust 单测/集成）|
+| Layer    | Choice                                              |
+| -------- | --------------------------------------------------- |
+| Shell    | [Tauri 2](https://tauri.app/)                       |
+| Frontend | React 18 + TypeScript + Vite 5                      |
+| Backend  | Rust (Tauri commands)                               |
+| Git      | Shells out to the system `git`, **not** via libgit2 |
+| Testing  | Playwright (E2E) + `cargo test` (Rust)              |
 
-## 环境要求
+## Requirements
 
-- Linux 或 macOS
-- Node.js ≥ 18（推荐通过 nvm）
-- Rust stable 工具链（`rustup`）
-- 系统可用的 `git`
-- Linux 还需 WebKitGTK / GTK 相关依赖，按 [Tauri 官方前置依赖](https://tauri.app/start/prerequisites/) 安装
+- Linux or macOS
+- Node.js ≥ 18 (nvm recommended)
+- Rust stable toolchain (`rustup`)
+- `git` on `PATH`
+- Linux additionally needs WebKitGTK / GTK dependencies — follow the [Tauri prerequisites guide](https://tauri.app/start/prerequisites/).
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 克隆
+# Clone
 git clone https://github.com/yiwen65/SkillDock.git
 cd SkillDock
 
-# 安装前端依赖
+# Install frontend deps
 npm install
 
-# 启动桌面开发模式（Tauri + Vite）
+# Start the desktop dev mode (Tauri + Vite)
 npm run tauri:dev
 ```
 
-首次运行 Rust 依赖会全量编译（含 `webkit2gtk-sys` 等原生依赖），需要几分钟。后续增量构建会快得多。
+The first run will compile the full Rust dependency graph (including native deps like `webkit2gtk-sys`) and takes several minutes. Subsequent incremental builds are fast.
 
-仅调试前端（无 Tauri 外壳）：
+Frontend-only dev (no Tauri shell):
 
 ```bash
 npm run dev         # Vite dev server at http://127.0.0.1:1420
 ```
 
-构建发布产物：
+Release build:
 
 ```bash
-npm run tauri:build # 产物在 src-tauri/target/release/bundle/
+npm run tauri:build # Artifacts land in src-tauri/target/release/bundle/
 ```
 
-## 常用脚本
+## Common Scripts
 
-| 命令 | 说明 |
-| ---- | ---- |
-| `npm run dev` | 仅启动 Vite |
-| `npm run build` | `tsc` + `vite build` |
-| `npm run tauri:dev` | 完整桌面开发模式 |
-| `npm run tauri:build` | 构建桌面产物 |
-| `npm run e2e` | Playwright E2E 测试 |
-| `npm run ui:smoke` | UI smoke 脚本（`scripts/ui-smoke.mjs`）|
-| `npm run rust:test` | `cargo test` Rust 后端测试 |
+| Command               | Purpose                                    |
+| --------------------- | ------------------------------------------ |
+| `npm run dev`         | Vite only                                  |
+| `npm run build`       | `tsc` + `vite build`                       |
+| `npm run tauri:dev`   | Full desktop dev mode                      |
+| `npm run tauri:build` | Build the desktop bundle                   |
+| `npm run e2e`         | Playwright E2E tests                       |
+| `npm run ui:smoke`    | UI smoke script (`scripts/ui-smoke.mjs`)   |
+| `npm run rust:test`   | `cargo test` for the Rust backend          |
 
-## 目录结构
+## Directory Layout
 
 ```text
 SkillDock/
-├── src/                    # React 前端
+├── src/                    # React frontend
 │   ├── App.tsx
 │   ├── CoreView.tsx
 │   ├── views/              # Skills / Projects / Agents / Tasks / Settings
-│   └── lib/                # Tauri commands, types, 共享工具
-├── src-tauri/              # Rust 后端 (Tauri)
+│   └── lib/                # Tauri commands, types, shared helpers
+├── src-tauri/              # Rust backend (Tauri)
 │   ├── src/
-│   │   ├── workspace.rs    # workspace 扫描
-│   │   ├── scanner.rs      # SKILL.md 解析
+│   │   ├── workspace.rs    # workspace scanning
+│   │   ├── scanner.rs      # SKILL.md parsing
 │   │   ├── git_ops.rs      # git fetch / pull / status
-│   │   ├── links.rs        # symlink 安装 / 卸载 / 预览
-│   │   ├── agents.rs       # agent profile 管理
-│   │   ├── tasks.rs        # 串行任务队列
-│   │   └── config.rs       # workspace + user 配置
-│   └── tests/              # 后端集成测试
-├── scripts/                # 保留的 shell fallback 与工具脚本
+│   │   ├── links.rs        # symlink install / uninstall / preview
+│   │   ├── agents.rs       # agent profile management
+│   │   ├── tasks.rs        # serial task queue
+│   │   └── config.rs       # workspace + user config
+│   └── tests/              # backend integration tests
+├── scripts/                # retained shell fallbacks and utilities
 ├── tests/e2e/              # Playwright E2E
-├── docs/                   # 设计文档
-│   ├── skilldock.md                     # 设计文档（产品 + 架构）
-│   ├── skilldock-implementation-plan.md # 实施计划
-│   ├── skilldock-tasks.md               # 任务拆分
-│   └── images/                          # README 资源
-└── public/                 # 前端静态资源（app 图标等）
+├── docs/                   # design docs
+│   ├── skilldock.md                     # design (product + architecture)
+│   ├── skilldock-implementation-plan.md # implementation plan
+│   ├── skilldock-tasks.md               # task breakdown
+│   └── images/                          # README assets
+└── public/                 # frontend static assets (app icon, etc.)
 ```
 
-## 配置模型
+## Configuration Model
 
-两层配置，详见设计文档。
+Two layers, detailed in the design doc:
 
-- **Workspace config** — `<workspace>/.skilldock/config.json`：项目标签、备注、收藏/隐藏、自定义显示名等与 collection 绑定的 metadata。
-- **User app config** — 最近 workspace、agent profiles、UI 偏好、检查间隔等与用户绑定的设置。
+- **Workspace config** — `<workspace>/.skilldock/config.json`: per-collection metadata such as tags, notes, favorites / hidden flags, and custom display names.
+- **User app config** — the recent workspace list, agent profiles, UI preferences, check interval, etc.
 
-原则：**文件系统与 Git 是真相来源**；config 只存用户偏好与覆盖值，agent 安装状态永远由 agent 目录中的 symlink 实时反查。
+Principle: **the filesystem and Git are the source of truth.** Config only stores user preferences and overrides; agent install status is always recomputed from symlinks in the agent directories.
 
-## 安全原则
+## Safety Principles
 
-- 不覆盖普通文件或目录
-- 不删除项目目录
-- 不删除 agent 目录中的真实文件
-- 默认跳过 dirty Git 仓库
-- 默认使用 `git pull --ff-only --prune`
-- 不自动联网，除非用户显式触发
-- 软链接来源必须在当前 workspace 内
-- 所有批量 mutating 操作先预览再执行
+- Never overwrite real files or directories
+- Never delete project directories
+- Never delete real files inside agent directories
+- Skip dirty Git repos by default
+- Always use `git pull --ff-only --prune` by default
+- Never go online without an explicit user action
+- Symlink sources must live inside the current workspace
+- Every batch-mutating operation shows a preview first
 
-## 文档
+## Documentation
 
-- [产品与架构设计](docs/skilldock.md)
-- [实施计划](docs/skilldock-implementation-plan.md)
-- [任务拆分](docs/skilldock-tasks.md)
-- [AGENTS 协作约定](AGENTS.md)
+- [Product & architecture design](docs/skilldock.md) (Chinese)
+- [Implementation plan](docs/skilldock-implementation-plan.md) (Chinese)
+- [Task breakdown](docs/skilldock-tasks.md) (Chinese)
+- [AGENTS collaboration conventions](AGENTS.md)
 
-## 项目状态
+## Status
 
-MVP 开发中，详见 [docs/skilldock-tasks.md](docs/skilldock-tasks.md)。欢迎 Issue 与 PR。
+MVP in progress. See [docs/skilldock-tasks.md](docs/skilldock-tasks.md) for the active task list. Issues and PRs are welcome.
 
 ## License
 
-暂未设定显式 License，使用前请自行评估。计划在首个对外发布版本前补齐 `LICENSE` 文件。
+No explicit license is declared yet — evaluate before use. A `LICENSE` file will be added before the first public release.
