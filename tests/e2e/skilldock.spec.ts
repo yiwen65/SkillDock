@@ -72,21 +72,31 @@ test("selects a workspace and validates the skills-centered MVP flow", async ({ 
   await expect(page.getByText("Check production readiness before release.").first()).toBeVisible();
 
   await page.getByLabel("Search").fill("");
-  await page.getByRole("button", { name: "Preview install" }).click();
-  await expect(page.getByText("will_link", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Install", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "Install", exact: true }).click();
+  // Single-install flow: the earlier "Preview install → will_link → Install"
+  // three-step UI was collapsed into a single "Install" button that
+  // previews + links internally. Scope to .single-action-grid so this
+  // doesn't clash with the batch section's own Install button.
+  const singleInstall = page
+    .locator(".single-action-grid")
+    .getByRole("button", { name: "Install", exact: true });
+  await expect(singleInstall).toBeEnabled();
+  await singleInstall.click();
   await expect(page.getByText("Linked TDD into Claude Code.")).toBeVisible();
-  await expect(page.locator(".metric").filter({ hasText: "Installs" })).toContainText("2");
 
-  await page.getByRole("button", { name: "Select visible" }).click();
-  await page.getByRole("checkbox", { name: "Codex" }).check();
-  await page.getByRole("button", { name: /^Preview$/ }).click();
-  await expect(page.getByText("2 link targets previewed.")).toBeVisible();
-  await page.getByRole("button", { name: "Execute safe" }).click();
-  await expect(
-    page.getByText("Batch link: 1 linked, 1 already installed, 0 skipped, 0 failed."),
-  ).toBeVisible();
+  // The Installs metric counts distinct skills that have at least one
+  // install, not total links. TDD was already installed in Codex in the
+  // mock, so adding Claude Code does not bump the count — Deploy Guard is
+  // still uninstalled. The count goes to 2 only after the batch install
+  // below adds Deploy Guard's first install.
+
+  // Batch-install flow: likewise collapsed from preview/execute into one
+  // button. Scope to .batch-section for the same disambiguation reason.
+  const batchSection = page.locator(".batch-section");
+  await batchSection.getByRole("button", { name: "Select visible" }).click();
+  await batchSection.getByRole("checkbox", { name: "Codex" }).check();
+  await batchSection.getByRole("button", { name: "Install", exact: true }).click();
+  await expect(page.getByText("1 linked, 1 already installed, 0 skipped, 0 failed.")).toBeVisible();
+  await expect(page.locator(".metric").filter({ hasText: "Installs" })).toContainText("2");
 });
 
 test("covers project import, update controls, filtering and hide metadata", async ({ page }) => {
@@ -144,9 +154,12 @@ test("covers agent profile creation, missing directory creation and safe unlink"
   await page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Create directory" }).click();
   await expect(page.getByText("Missing Agent directory created.")).toBeVisible();
-  await expect(page.locator(".agent-row").filter({ hasText: "Missing Agent" })).toContainText(
-    "exists",
-  );
+  // After the directory exists the Create-directory button disappears from
+  // the row (the button is conditionally rendered on !state.exists). Assert
+  // that behavioural fact rather than the old textual "exists" badge, which
+  // the UI no longer renders.
+  const missingAgentRow = page.locator(".agent-row").filter({ hasText: "Missing Agent" });
+  await expect(missingAgentRow.getByRole("button", { name: "Create directory" })).toHaveCount(0);
 
   await page.getByLabel("Profile id").fill("aider");
   await page.getByLabel("Name").fill("Aider");
@@ -155,18 +168,22 @@ test("covers agent profile creation, missing directory creation and safe unlink"
   await expect(page.getByText("Aider saved.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Aider" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Preview uninstall" }).first().click();
-  await expect(page.getByText("Uninstall preview: will_unlink")).toBeVisible();
-  await page.getByRole("button", { name: "Execute uninstall" }).click();
+  // Uninstall flow: the earlier "Preview uninstall → Execute uninstall"
+  // two-step UI was collapsed into a single "Uninstall" button in each
+  // linked-skill row. In the mock, only TDD is linked (into Codex), so
+  // .first() unambiguously hits that row's Uninstall control.
+  await page.getByRole("button", { name: "Uninstall", exact: true }).first().click();
   await expect(page.getByText("Unlinked agent-skills-tdd from Codex.")).toBeVisible();
   await expect(page.getByText("No workspace skills linked.").first()).toBeVisible();
 });
 
 test("covers task logs and settings persistence", async ({ page }) => {
   await openMockWorkspace(page);
-  await page.getByRole("button", { name: "Tasks / Logs" }).click();
+  // Nav and panel header are both labelled just "Logs" now (the old
+  // "Tasks / Logs" label was dropped when the view was renamed).
+  await page.getByRole("button", { name: "Logs" }).click();
 
-  await expect(page.getByRole("heading", { name: "Tasks / Logs" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Logs" }).first()).toBeVisible();
   await expect(page.getByText("Initial workspace scan completed.")).toBeVisible();
   await page.getByRole("button", { name: "Expand logs" }).click();
   await expect(page.getByText("scan complete", { exact: true })).toBeVisible();
@@ -175,7 +192,11 @@ test("covers task logs and settings persistence", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Preferences" })).toBeVisible();
   await page.getByLabel("Theme").selectOption("dark");
-  await page.getByLabel("Check interval minutes").fill("9999");
+  // The interval field is only rendered when "Enable automatic checks" is
+  // on, and its unit switched from minutes to days (intervalMinutes patch
+  // value is `days * 1440`). 1 day → 1440 minutes, matching the check below.
+  await page.getByLabel("Enable automatic checks").check();
+  await page.getByLabel("Check interval (days)").fill("1");
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByText("Settings saved.")).toBeVisible();
 
