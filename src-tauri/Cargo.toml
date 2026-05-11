@@ -3,6 +3,11 @@ name = "skilldock"
 version = "0.1.0"
 description = "Desktop manager for a local SkillDock workspace"
 edition = "2021"
+# PolyForm Noncommercial 1.0.0 is not on SPDX's standard list, so use
+# `license-file` rather than `license`. See LICENSE.md at the repo root.
+license-file = "../LICENSE.md"
+repository = "https://github.com/yiwen65/SkillDock"
+publish = false
 
 [lib]
 name = "skilldock_lib"

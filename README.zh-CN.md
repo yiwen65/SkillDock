@@ -155,4 +155,10 @@ MVP 开发中，详见 [docs/skilldock-tasks.md](docs/skilldock-tasks.md)。欢�
 
 ## License
 
-暂未设定显式 License，使用前请自行评估。计划在首个对外发布版本前补齐 `LICENSE` 文件。
+SkillDock 采用 [PolyForm Noncommercial License 1.0.0](LICENSE.md) 发布，要点如下：
+
+- **允许**：个人使用、研究、学习、兴趣项目，以及其他一切非商业用途。
+- **允许**：慈善机构、教育机构、高校、公共研究 / 医疗 / 安全 / 环保 / 政府机构使用。
+- **禁止**：任何商业用途。如需商用，请通过 issue 或其他渠道联系作者，另行谈商业授权。
+
+该许可证属于 **source-available（源码可见但非开源）** —— 它刻意限制了商业使用，因此不符合 OSI 的开源定义。完整许可证文本见 [`LICENSE.md`](LICENSE.md)。
