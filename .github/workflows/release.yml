@@ -24,7 +24,7 @@ jobs:
       release_id: ${{ steps.create.outputs.result }}
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve tag
         id: resolve
@@ -81,7 +81,7 @@ jobs:
             tauri-args: --features desktop -c src-tauri/tauri.release.conf.json
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
