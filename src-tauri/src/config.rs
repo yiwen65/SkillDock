@@ -94,7 +94,10 @@ pub struct UiPreferences {
 impl Default for UiPreferences {
     fn default() -> Self {
         Self {
-            theme: ThemePreference::System,
+            // Ship a dark theme for first-run users. Existing installs keep
+            // whatever is in their saved config.json because this default is
+            // only consulted when no config exists.
+            theme: ThemePreference::Dark,
             project_sort: ProjectSort::Name,
             show_hidden_projects: false,
         }
