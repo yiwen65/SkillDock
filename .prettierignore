@@ -1,0 +1,26 @@
+dist/
+dist-ssr/
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+test-results/
+playwright-report/
+coverage/
+
+# Lockfiles and generated files
+package-lock.json
+src-tauri/Cargo.lock
+
+# Binary / non-text
+*.png
+*.ico
+*.icns
+*.webm
+*.zip
+
+# Rust sources are formatted by rustfmt
+*.rs
+
+# Markdown authored by hand (includes CJK docs); Prettier's wrap behaviour
+# would mangle line breaks in the Chinese design documents.
+*.md

@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  previewUnlinkSkill,
-  saveAgentProfiles,
-  scanWorkspace,
-  unlinkSkill,
-} from "../lib/commands";
+import { previewUnlinkSkill, saveAgentProfiles, scanWorkspace, unlinkSkill } from "../lib/commands";
 import { EmptyState, PanelHeader, errorMessage } from "../lib/shared";
 import type {
   AgentProfile,
@@ -38,7 +33,10 @@ function isValidProfilePath(path: string) {
 function isValidUncPath(path: string) {
   const normalized = path.replace(/\\/g, "/");
   if (!normalized.startsWith("//")) return false;
-  const parts = normalized.slice(2).split("/").filter((part) => part.length > 0);
+  const parts = normalized
+    .slice(2)
+    .split("/")
+    .filter((part) => part.length > 0);
   return parts.length >= 2;
 }
 
@@ -65,15 +63,19 @@ function validateProfileDrafts(profiles: AgentProfile[]) {
   for (const profile of profiles) {
     const id = profile.id.trim();
     if (!id) return "Profile id is required.";
-    if (profile.id !== id) return `Profile id '${id}' must not contain leading or trailing whitespace.`;
-    if (!/^[a-zA-Z0-9._-]+$/.test(id)) return `Profile id '${id}' may only use letters, numbers, dots, underscores and hyphens.`;
+    if (profile.id !== id)
+      return `Profile id '${id}' must not contain leading or trailing whitespace.`;
+    if (!/^[a-zA-Z0-9._-]+$/.test(id))
+      return `Profile id '${id}' may only use letters, numbers, dots, underscores and hyphens.`;
     if (ids.has(id)) return `Profile id '${id}' is duplicated.`;
     ids.add(id);
     if (!profile.name.trim()) return `Profile '${id}' requires a name.`;
     const skillsDir = profile.skillsDir.trim();
-    if (!isValidProfilePath(skillsDir)) return `Profile '${id}' requires an absolute or home-relative skills directory.`;
+    if (!isValidProfilePath(skillsDir))
+      return `Profile '${id}' requires an absolute or home-relative skills directory.`;
     const normalizedSkillsDir = normalizeProfilePathForCompare(skillsDir);
-    if (skillsDirs.has(normalizedSkillsDir)) return `Profile skills directory '${skillsDir}' is duplicated.`;
+    if (skillsDirs.has(normalizedSkillsDir))
+      return `Profile skills directory '${skillsDir}' is duplicated.`;
     skillsDirs.add(normalizedSkillsDir);
   }
   return null;
@@ -92,7 +94,14 @@ function emptyCustomProfile(existingProfiles: AgentProfile[]): AgentProfile {
     id = `custom-agent-${suffix}`;
     skillsDir = `~/skills/${id}`;
   }
-  return { id, name: `Custom Agent ${suffix}`, skillsDir, enabled: true, builtIn: false, linkMode: "symlink" };
+  return {
+    id,
+    name: `Custom Agent ${suffix}`,
+    skillsDir,
+    enabled: true,
+    builtIn: false,
+    linkMode: "symlink",
+  };
 }
 
 export function AgentsView({
@@ -107,9 +116,13 @@ export function AgentsView({
   workspace: Workspace;
 }) {
   const profiles = workspace.agentProfiles;
-  const [draftProfiles, setDraftProfiles] = useState<AgentProfile[]>(profiles.map((state) => state.profile));
+  const [draftProfiles, setDraftProfiles] = useState<AgentProfile[]>(
+    profiles.map((state) => state.profile),
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formProfile, setFormProfile] = useState<AgentProfile>(() => emptyCustomProfile(draftProfiles));
+  const [formProfile, setFormProfile] = useState<AgentProfile>(() =>
+    emptyCustomProfile(draftProfiles),
+  );
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [agentsBusy, setAgentsBusy] = useState(false);
   const agentsBusyRef = useRef(false);
@@ -204,7 +217,10 @@ export function AgentsView({
     );
   };
 
-  const directLinkedSkillUninstall = async (profile: AgentProfileState, link: LinkedProfileSkill) => {
+  const directLinkedSkillUninstall = async (
+    profile: AgentProfileState,
+    link: LinkedProfileSkill,
+  ) => {
     if (agentsBusyRef.current) return;
     agentsBusyRef.current = true;
     setAgentsBusy(true);
@@ -243,7 +259,10 @@ export function AgentsView({
       <div className="agents-layout">
         <div className="table-list">
           {profiles.length === 0 && (
-            <EmptyState title="No agent profiles" body="Add a custom profile to start linking skills." />
+            <EmptyState
+              title="No agent profiles"
+              body="Add a custom profile to start linking skills."
+            />
           )}
           {profiles.map((state) => {
             const linkedSkills = linkedSkillsByProfile.get(state.profile.id) ?? [];
@@ -252,8 +271,12 @@ export function AgentsView({
                 <div className="agent-main">
                   <div className="agent-title-line">
                     <h2>{state.profile.name}</h2>
-                    <span className="subtle-pill">{state.profile.builtIn ? "Built-in" : "Custom"}</span>
-                    <span className={state.profile.enabled ? "subtle-pill" : "subtle-pill muted-pill"}>
+                    <span className="subtle-pill">
+                      {state.profile.builtIn ? "Built-in" : "Custom"}
+                    </span>
+                    <span
+                      className={state.profile.enabled ? "subtle-pill" : "subtle-pill muted-pill"}
+                    >
                       {state.profile.enabled ? "Enabled" : "Disabled"}
                     </span>
                   </div>
@@ -264,7 +287,10 @@ export function AgentsView({
                   <div className="agent-linked-list">
                     {linkedSkills.length === 0 && <p>No workspace skills linked.</p>}
                     {linkedSkills.map((link) => (
-                      <div className="agent-linked-row" key={`${state.profile.id}\u0000${link.linkName}`}>
+                      <div
+                        className="agent-linked-row"
+                        key={`${state.profile.id}\u0000${link.linkName}`}
+                      >
                         <div>
                           <strong>{link.skillName}</strong>
                           <span>{link.linkName}</span>
@@ -284,15 +310,30 @@ export function AgentsView({
                 </div>
                 <div className="row-actions agent-actions">
                   {!state.exists && (
-                    <button className="secondary-button" disabled={agentsBusy} onClick={() => createProfileDir(state)} type="button">
+                    <button
+                      className="secondary-button"
+                      disabled={agentsBusy}
+                      onClick={() => createProfileDir(state)}
+                      type="button"
+                    >
                       Create directory
                     </button>
                   )}
-                  <button className="secondary-button" disabled={agentsBusy} onClick={() => toggleProfile(state.profile)} type="button">
+                  <button
+                    className="secondary-button"
+                    disabled={agentsBusy}
+                    onClick={() => toggleProfile(state.profile)}
+                    type="button"
+                  >
                     {state.profile.enabled ? "Disable" : "Enable"}
                   </button>
                   {!state.profile.builtIn && (
-                    <button className="secondary-button" disabled={agentsBusy} onClick={() => startEditProfile(state.profile)} type="button">
+                    <button
+                      className="secondary-button"
+                      disabled={agentsBusy}
+                      onClick={() => startEditProfile(state.profile)}
+                      type="button"
+                    >
                       Edit
                     </button>
                   )}
@@ -310,7 +351,14 @@ export function AgentsView({
         >
           <div className="form-title-row">
             <h2>{editingId ? "Edit custom profile" : "Add custom profile"}</h2>
-            <button className="secondary-button" disabled={agentsBusy} onClick={startAddProfile} type="button">New</button>
+            <button
+              className="secondary-button"
+              disabled={agentsBusy}
+              onClick={startAddProfile}
+              type="button"
+            >
+              New
+            </button>
           </div>
           <label>
             <span>Profile id</span>
@@ -334,7 +382,9 @@ export function AgentsView({
           <label>
             <span>Skills directory</span>
             <input
-              onChange={(event) => setFormProfile({ ...formProfile, skillsDir: event.target.value })}
+              onChange={(event) =>
+                setFormProfile({ ...formProfile, skillsDir: event.target.value })
+              }
               placeholder="~/.my-agent/skills"
               value={formProfile.skillsDir}
               readOnly={agentsBusy}
@@ -344,12 +394,16 @@ export function AgentsView({
             <input
               checked={formProfile.enabled}
               disabled={agentsBusy}
-              onChange={(event) => setFormProfile({ ...formProfile, enabled: event.target.checked })}
+              onChange={(event) =>
+                setFormProfile({ ...formProfile, enabled: event.target.checked })
+              }
               type="checkbox"
             />
             <span>Enabled</span>
           </label>
-          <button className="primary-button" disabled={agentsBusy} type="submit">Save profile</button>
+          <button className="primary-button" disabled={agentsBusy} type="submit">
+            Save profile
+          </button>
           {profileMessage && <p className="form-error">{profileMessage}</p>}
         </form>
       </div>

@@ -77,7 +77,9 @@ export function SkillsView({
     [projects],
   );
   const selectedSkill = skills.find((skill) => skill.id === selectedSkillId) ?? skills[0];
-  const selectedProject = selectedSkill ? projectById.get(selectedSkill.sourceProjectId) : undefined;
+  const selectedProject = selectedSkill
+    ? projectById.get(selectedSkill.sourceProjectId)
+    : undefined;
   const selectedInstalledProfiles = selectedSkill
     ? selectedSkill.installedAgents.map((install) => install.agentProfileId)
     : [];
@@ -166,7 +168,8 @@ export function SkillsView({
       if (
         !["all", "installed", "not-installed"].includes(agentFilter) &&
         !skill.installedAgents.some((install) => install.status === agentFilter)
-      ) return false;
+      )
+        return false;
       if (!normalizedQuery) return true;
       return [skill.name, skill.description, skill.relativePath, skill.absolutePath]
         .filter(Boolean)
@@ -326,7 +329,12 @@ export function SkillsView({
   };
 
   if (skills.length === 0) {
-    return <EmptyState title="No skills found" body="Refresh after adding projects with SKILL.md files." />;
+    return (
+      <EmptyState
+        title="No skills found"
+        body="Refresh after adding projects with SKILL.md files."
+      />
+    );
   }
 
   return (
@@ -344,11 +352,15 @@ export function SkillsView({
           </label>
           <label>
             <span>Project</span>
-            <select onChange={(event) => setProjectFilter(event.target.value)} value={projectFilter}>
+            <select
+              onChange={(event) => setProjectFilter(event.target.value)}
+              value={projectFilter}
+            >
               <option value="all">All projects ({skills.length})</option>
               {projectOptions.map((projectId) => (
                 <option key={projectId} value={projectId}>
-                  {projectById.get(projectId)?.name ?? projectId} ({projectCounts.get(projectId) ?? 0})
+                  {projectById.get(projectId)?.name ?? projectId} (
+                  {projectCounts.get(projectId) ?? 0})
                 </option>
               ))}
             </select>
@@ -358,11 +370,21 @@ export function SkillsView({
             <select onChange={(event) => setAgentFilter(event.target.value)} value={agentFilter}>
               <option value="all">All statuses ({skills.length})</option>
               <option value="installed">Installed ({installStatusCounts.installed})</option>
-              <option value="not-installed">Not installed ({installStatusCounts.notInstalled})</option>
-              <option value="valid">Valid ({installStatusCounts.byStatus.get("valid") ?? 0})</option>
-              <option value="broken">Broken ({installStatusCounts.byStatus.get("broken") ?? 0})</option>
-              <option value="external">External ({installStatusCounts.byStatus.get("external") ?? 0})</option>
-              <option value="conflict">Conflict ({installStatusCounts.byStatus.get("conflict") ?? 0})</option>
+              <option value="not-installed">
+                Not installed ({installStatusCounts.notInstalled})
+              </option>
+              <option value="valid">
+                Valid ({installStatusCounts.byStatus.get("valid") ?? 0})
+              </option>
+              <option value="broken">
+                Broken ({installStatusCounts.byStatus.get("broken") ?? 0})
+              </option>
+              <option value="external">
+                External ({installStatusCounts.byStatus.get("external") ?? 0})
+              </option>
+              <option value="conflict">
+                Conflict ({installStatusCounts.byStatus.get("conflict") ?? 0})
+              </option>
             </select>
           </label>
         </div>
@@ -381,15 +403,22 @@ export function SkillsView({
               />
             );
           })}
-          {filteredSkills.length === 0 && <p className="batch-message">No skills match the current filters.</p>}
+          {filteredSkills.length === 0 && (
+            <p className="batch-message">No skills match the current filters.</p>
+          )}
         </div>
       </section>
 
       <section className="data-panel skill-detail-panel">
-        <PanelHeader title={selectedSkill?.name ?? "Skill detail"} detail={selectedProject?.name ?? ""} />
+        <PanelHeader
+          title={selectedSkill?.name ?? "Skill detail"}
+          detail={selectedProject?.name ?? ""}
+        />
         {selectedSkill && (
           <>
-            {selectedSkill.description && <p className="detail-description">{selectedSkill.description}</p>}
+            {selectedSkill.description && (
+              <p className="detail-description">{selectedSkill.description}</p>
+            )}
             <div className="skill-detail-facts" aria-label="Selected skill summary">
               <span>{selectedProject?.name ?? selectedSkill.sourceProjectId}</span>
               <span>
@@ -427,12 +456,17 @@ export function SkillsView({
             <div className="single-action-grid">
               <label>
                 <span>Install target</span>
-                <select onChange={(event) => setSingleProfileId(event.target.value)} value={singleProfileId}>
+                <select
+                  onChange={(event) => setSingleProfileId(event.target.value)}
+                  value={singleProfileId}
+                >
                   {agentProfiles.map((state) => {
                     const alreadyInstalled = selectedInstalledProfiles.includes(state.profile.id);
                     return (
                       <option key={state.profile.id} value={state.profile.id}>
-                        {alreadyInstalled ? `${state.profile.name} (installed)` : state.profile.name}
+                        {alreadyInstalled
+                          ? `${state.profile.name} (installed)`
+                          : state.profile.name}
                       </option>
                     );
                   })}
@@ -444,7 +478,8 @@ export function SkillsView({
                   busy ||
                   !singleProfileId ||
                   selectedInstalledProfiles.includes(singleProfileId) ||
-                  agentProfiles.find((s) => s.profile.id === singleProfileId)?.profile.enabled === false
+                  agentProfiles.find((s) => s.profile.id === singleProfileId)?.profile.enabled ===
+                    false
                 }
                 onClick={directSingleInstall}
                 title={
@@ -461,7 +496,10 @@ export function SkillsView({
             <div className="installed-list">
               <h2>Installed agents</h2>
               {selectedSkill.installedAgents.map((install) => (
-                <div className="installed-row" key={`${install.agentProfileId}:${install.linkName}`}>
+                <div
+                  className="installed-row"
+                  key={`${install.agentProfileId}:${install.linkName}`}
+                >
                   <div>
                     <strong>{profileName(agentProfiles, install.agentProfileId)}</strong>
                     <span>{install.linkName}</span>
@@ -535,14 +573,22 @@ export function SkillsView({
       </section>
 
       {markdownPreview !== null && (
-        <div className="dialog-backdrop" role="presentation" onClick={() => setMarkdownPreview(null)}>
+        <div
+          className="dialog-backdrop"
+          role="presentation"
+          onClick={() => setMarkdownPreview(null)}
+        >
           <div className="data-panel markdown-preview-dialog" onClick={(e) => e.stopPropagation()}>
             <PanelHeader title={`${selectedSkill?.name ?? "Skill"} — SKILL.md`} detail="" />
             <div
               className="markdown-preview-content"
               dangerouslySetInnerHTML={{ __html: markdownPreview }}
             />
-            <button className="secondary-button" onClick={() => setMarkdownPreview(null)} type="button">
+            <button
+              className="secondary-button"
+              onClick={() => setMarkdownPreview(null)}
+              type="button"
+            >
               Close
             </button>
           </div>
@@ -594,7 +640,9 @@ function SkillRow({
         <p>{skill.description || skill.relativePath}</p>
       </div>
       <div className="skill-row-status">
-        <strong className={skill.installedAgents.length > 0 ? "status-installed" : "status-not-installed"}>
+        <strong
+          className={skill.installedAgents.length > 0 ? "status-installed" : "status-not-installed"}
+        >
           {skill.installedAgents.length > 0
             ? `${skill.installedAgents.length} installed`
             : "Not installed"}

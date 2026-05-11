@@ -86,11 +86,7 @@ export function CoreView({
         />
       )}
       {activeView === "Logs" && (
-        <TasksView
-          focusedTaskId={focusedTaskId}
-          onTaskChange={onTaskChange}
-          tasks={taskHistory}
-        />
+        <TasksView focusedTaskId={focusedTaskId} onTaskChange={onTaskChange} tasks={taskHistory} />
       )}
       {activeView === "Settings" && (
         <SettingsView
@@ -105,7 +101,11 @@ export function CoreView({
 
 function WorkspaceMetrics({ workspace }: { workspace: Workspace }) {
   const installedCount = useMemo(
-    () => workspace.skills.reduce((count, skill) => count + (skill.installedAgents.length > 0 ? 1 : 0), 0),
+    () =>
+      workspace.skills.reduce(
+        (count, skill) => count + (skill.installedAgents.length > 0 ? 1 : 0),
+        0,
+      ),
     [workspace.skills],
   );
 

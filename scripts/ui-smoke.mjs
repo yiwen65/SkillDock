@@ -141,11 +141,13 @@ try {
   const appModule = await server.ssrLoadModule("/src/App.tsx");
   const { default: App, WorkspaceSelector } = appModule;
   const { CoreView } = await server.ssrLoadModule("/src/CoreView.tsx");
-  const { buildLatestProjectErrorIndex } = await server.ssrLoadModule("/src/views/ProjectsView.tsx");
-  const { applyThemePreference, mergeTaskRecords, preserveLogs } = await server.ssrLoadModule(
-    "/src/lib/shared.tsx",
+  const { buildLatestProjectErrorIndex } = await server.ssrLoadModule(
+    "/src/views/ProjectsView.tsx",
   );
-  const { restoreRecentWorkspace, selectWorkspace } = await server.ssrLoadModule("/src/lib/commands.ts");
+  const { applyThemePreference, mergeTaskRecords, preserveLogs } =
+    await server.ssrLoadModule("/src/lib/shared.tsx");
+  const { restoreRecentWorkspace, selectWorkspace } =
+    await server.ssrLoadModule("/src/lib/commands.ts");
 
   assert.equal(await restoreRecentWorkspace(), null);
   await assert.rejects(
@@ -260,7 +262,10 @@ try {
       },
     ],
   };
-  const refreshedErrorIndex = buildLatestProjectErrorIndex([successfulFetch, failedFetch], workspace.root);
+  const refreshedErrorIndex = buildLatestProjectErrorIndex(
+    [successfulFetch, failedFetch],
+    workspace.root,
+  );
   assert.equal(refreshedErrorIndex.has("project-one"), false);
 
   const logs = render(

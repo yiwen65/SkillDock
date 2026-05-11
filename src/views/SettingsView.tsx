@@ -19,7 +19,10 @@ function isValidProfilePath(path: string) {
   if (path.startsWith("\\\\") || path.startsWith("//")) {
     const normalized = path.replace(/\\/g, "/");
     if (!normalized.startsWith("//")) return false;
-    const parts = normalized.slice(2).split("/").filter((part) => part.length > 0);
+    const parts = normalized
+      .slice(2)
+      .split("/")
+      .filter((part) => part.length > 0);
     return parts.length >= 2;
   }
   return (
@@ -54,15 +57,19 @@ function validateProfileDrafts(profiles: AgentProfile[]) {
   for (const profile of profiles) {
     const id = profile.id.trim();
     if (!id) return "Profile id is required.";
-    if (profile.id !== id) return `Profile id '${id}' must not contain leading or trailing whitespace.`;
-    if (!/^[a-zA-Z0-9._-]+$/.test(id)) return `Profile id '${id}' may only use letters, numbers, dots, underscores and hyphens.`;
+    if (profile.id !== id)
+      return `Profile id '${id}' must not contain leading or trailing whitespace.`;
+    if (!/^[a-zA-Z0-9._-]+$/.test(id))
+      return `Profile id '${id}' may only use letters, numbers, dots, underscores and hyphens.`;
     if (ids.has(id)) return `Profile id '${id}' is duplicated.`;
     ids.add(id);
     if (!profile.name.trim()) return `Profile '${id}' requires a name.`;
     const skillsDir = profile.skillsDir.trim();
-    if (!isValidProfilePath(skillsDir)) return `Profile '${id}' requires an absolute or home-relative skills directory.`;
+    if (!isValidProfilePath(skillsDir))
+      return `Profile '${id}' requires an absolute or home-relative skills directory.`;
     const normalizedSkillsDir = normalizeProfilePathForCompare(skillsDir);
-    if (skillsDirs.has(normalizedSkillsDir)) return `Profile skills directory '${skillsDir}' is duplicated.`;
+    if (skillsDirs.has(normalizedSkillsDir))
+      return `Profile skills directory '${skillsDir}' is duplicated.`;
     skillsDirs.add(normalizedSkillsDir);
   }
   return null;
@@ -103,7 +110,9 @@ export function SettingsView({
       .catch((error) => {
         if (!cancelled) setMessage(errorMessage(error));
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -208,8 +217,21 @@ export function SettingsView({
       let suffix = profiles.length + 1;
       const existingIds = new Set(profiles.map((p) => p.id));
       let id = `custom-agent-${suffix}`;
-      while (existingIds.has(id)) { suffix += 1; id = `custom-agent-${suffix}`; }
-      return [...profiles, { id, name: `Custom Agent ${suffix}`, skillsDir: `~/skills/${id}`, enabled: true, builtIn: false, linkMode: "symlink" as const }];
+      while (existingIds.has(id)) {
+        suffix += 1;
+        id = `custom-agent-${suffix}`;
+      }
+      return [
+        ...profiles,
+        {
+          id,
+          name: `Custom Agent ${suffix}`,
+          skillsDir: `~/skills/${id}`,
+          enabled: true,
+          builtIn: false,
+          linkMode: "symlink" as const,
+        },
+      ];
     });
   };
 
@@ -237,15 +259,34 @@ export function SettingsView({
         <div className="single-action-grid">
           <label>
             <span>Switch workspace</span>
-            <input onChange={(event) => setWorkspaceDraft(event.target.value)} value={workspaceDraft} placeholder="/path/to/workspace" />
+            <input
+              onChange={(event) => setWorkspaceDraft(event.target.value)}
+              value={workspaceDraft}
+              placeholder="/path/to/workspace"
+            />
           </label>
-          <button className="primary-button" disabled={busy} onClick={() => switchWorkspace(workspaceDraft)} type="button">Open</button>
+          <button
+            className="primary-button"
+            disabled={busy}
+            onClick={() => switchWorkspace(workspaceDraft)}
+            type="button"
+          >
+            Open
+          </button>
         </div>
         {config.recentWorkspaces.length > 0 && (
           <div className="recent-workspace-list">
             <span className="setting-label">Recent</span>
             {config.recentWorkspaces.map((path) => (
-              <button className="text-button" disabled={busy} key={path} onClick={() => switchWorkspace(path)} type="button">{path}</button>
+              <button
+                className="text-button"
+                disabled={busy}
+                key={path}
+                onClick={() => switchWorkspace(path)}
+                type="button"
+              >
+                {path}
+              </button>
             ))}
           </div>
         )}
@@ -256,7 +297,10 @@ export function SettingsView({
         <div className="settings-form-grid">
           <label>
             <span>Theme</span>
-            <select onChange={(event) => updateThemePreference(event.target.value as ThemePreference)} value={config.uiPreferences.theme}>
+            <select
+              onChange={(event) => updateThemePreference(event.target.value as ThemePreference)}
+              value={config.uiPreferences.theme}
+            >
               <option value="system">System</option>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
@@ -268,7 +312,10 @@ export function SettingsView({
               onChange={(event) =>
                 updateConfig((current) => ({
                   ...current,
-                  uiPreferences: { ...current.uiPreferences, projectSort: event.target.value as UserConfig["uiPreferences"]["projectSort"] },
+                  uiPreferences: {
+                    ...current.uiPreferences,
+                    projectSort: event.target.value as UserConfig["uiPreferences"]["projectSort"],
+                  },
                 }))
               }
               value={config.uiPreferences.projectSort}
@@ -286,7 +333,10 @@ export function SettingsView({
               onChange={(event) =>
                 updateConfig((current) => ({
                   ...current,
-                  uiPreferences: { ...current.uiPreferences, showHiddenProjects: event.target.checked },
+                  uiPreferences: {
+                    ...current.uiPreferences,
+                    showHiddenProjects: event.target.checked,
+                  },
                 }))
               }
               type="checkbox"
@@ -317,7 +367,10 @@ export function SettingsView({
                 onChange={(event) =>
                   updateConfig((current) => ({
                     ...current,
-                    automaticChecks: { ...current.automaticChecks, intervalMinutes: Number(event.target.value) * 1440 },
+                    automaticChecks: {
+                      ...current.automaticChecks,
+                      intervalMinutes: Number(event.target.value) * 1440,
+                    },
                   }))
                 }
                 type="number"
@@ -330,7 +383,10 @@ export function SettingsView({
                 onChange={(event) =>
                   updateConfig((current) => ({
                     ...current,
-                    automaticChecks: { ...current.automaticChecks, pullAfterCheck: event.target.checked },
+                    automaticChecks: {
+                      ...current.automaticChecks,
+                      pullAfterCheck: event.target.checked,
+                    },
                   }))
                 }
                 type="checkbox"
@@ -339,34 +395,63 @@ export function SettingsView({
             </label>
           </div>
         )}
-        <button className="primary-button" disabled={busy} onClick={saveGeneralSettings} type="button">Save settings</button>
+        <button
+          className="primary-button"
+          disabled={busy}
+          onClick={saveGeneralSettings}
+          type="button"
+        >
+          Save settings
+        </button>
       </section>
 
       <section className="data-panel compact-form settings-grid settings-profiles">
         <PanelHeader title="Agent profiles" detail={`${profileDrafts.length} profiles`} />
         <div className="panel-actions">
-          <button className="secondary-button" disabled={busy} onClick={addProfile} type="button">Add profile</button>
-          <button className="primary-button" disabled={busy} onClick={saveProfiles} type="button">Save profiles</button>
+          <button className="secondary-button" disabled={busy} onClick={addProfile} type="button">
+            Add profile
+          </button>
+          <button className="primary-button" disabled={busy} onClick={saveProfiles} type="button">
+            Save profiles
+          </button>
         </div>
         <div className="settings-profile-list">
           {profileDrafts.map((profile, index) => (
             <article className="settings-profile-row" key={`${index}:${profile.id}`}>
               <label>
                 <span>Id</span>
-                <input disabled={profile.builtIn} onChange={(event) => updateProfile(index, (item) => ({ ...item, id: event.target.value }))} value={profile.id} />
+                <input
+                  disabled={profile.builtIn}
+                  onChange={(event) =>
+                    updateProfile(index, (item) => ({ ...item, id: event.target.value }))
+                  }
+                  value={profile.id}
+                />
               </label>
               <label>
                 <span>Name</span>
-                <input onChange={(event) => updateProfile(index, (item) => ({ ...item, name: event.target.value }))} value={profile.name} />
+                <input
+                  onChange={(event) =>
+                    updateProfile(index, (item) => ({ ...item, name: event.target.value }))
+                  }
+                  value={profile.name}
+                />
               </label>
               <label>
                 <span>Skills directory</span>
-                <input onChange={(event) => updateProfile(index, (item) => ({ ...item, skillsDir: event.target.value }))} value={profile.skillsDir} />
+                <input
+                  onChange={(event) =>
+                    updateProfile(index, (item) => ({ ...item, skillsDir: event.target.value }))
+                  }
+                  value={profile.skillsDir}
+                />
               </label>
               <label className="inline-check">
                 <input
                   checked={profile.enabled}
-                  onChange={(event) => updateProfile(index, (item) => ({ ...item, enabled: event.target.checked }))}
+                  onChange={(event) =>
+                    updateProfile(index, (item) => ({ ...item, enabled: event.target.checked }))
+                  }
                   type="checkbox"
                 />
                 <span>Enabled</span>
@@ -375,7 +460,9 @@ export function SettingsView({
                 <button
                   className="secondary-button"
                   disabled={busy}
-                  onClick={() => setProfileDrafts((profiles) => profiles.filter((_, i) => i !== index))}
+                  onClick={() =>
+                    setProfileDrafts((profiles) => profiles.filter((_, i) => i !== index))
+                  }
                   type="button"
                 >
                   Remove

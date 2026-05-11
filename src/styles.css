@@ -44,7 +44,12 @@
   color: var(--color-text);
   background: var(--color-canvas);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
     sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -271,7 +276,9 @@ pre {
 .nav-item.active {
   color: #ffffff;
   background: var(--color-nav-active);
-  box-shadow: inset 3px 0 0 var(--color-brand-mark), 0 2px 8px rgb(0 0 0 / 12%);
+  box-shadow:
+    inset 3px 0 0 var(--color-brand-mark),
+    0 2px 8px rgb(0 0 0 / 12%);
 }
 
 .workspace {
@@ -532,7 +539,10 @@ h2 {
   text-align: center;
   background: linear-gradient(135deg, var(--color-surface) 0%, var(--color-surface-tint) 100%);
   border-color: var(--color-border);
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
 }
 
 .metric:hover {
@@ -740,7 +750,9 @@ h2 {
 .skill-row.selected {
   border-color: var(--color-selected-border);
   background: var(--color-selected-surface);
-  box-shadow: inset 3px 0 0 var(--color-focus), 0 2px 8px rgb(23 33 29 / 5%);
+  box-shadow:
+    inset 3px 0 0 var(--color-focus),
+    0 2px 8px rgb(23 33 29 / 5%);
 }
 
 .list-row.skill-row > .inline-check {
@@ -852,7 +864,9 @@ h2 {
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--color-surface);
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .installed-row:hover {
@@ -982,9 +996,15 @@ textarea[readonly] {
   line-height: 1.3;
 }
 
-.markdown-preview-content h1 { font-size: 1.5em; }
-.markdown-preview-content h2 { font-size: 1.25em; }
-.markdown-preview-content h3 { font-size: 1.1em; }
+.markdown-preview-content h1 {
+  font-size: 1.5em;
+}
+.markdown-preview-content h2 {
+  font-size: 1.25em;
+}
+.markdown-preview-content h3 {
+  font-size: 1.1em;
+}
 
 .markdown-preview-content p,
 .markdown-preview-content ul,
