@@ -21,7 +21,11 @@ fn temp_dir(name: &str) -> PathBuf {
         unique
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    // Canonicalize so the path matches what `validate_workspace_root` returns
+    // inside production code. Without this, macOS's `/var -> /private/var`
+    // symlink causes string-based path assertions to fail because production
+    // code canonicalizes its input while the test workspace doesn't.
+    std::fs::canonicalize(&dir).unwrap()
 }
 
 fn git(dir: &Path, args: &[&str]) {
