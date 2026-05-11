@@ -21,7 +21,10 @@ fn temp_dir(name: &str) -> PathBuf {
         unique
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    // See tests/git_operations.rs::temp_dir for why we canonicalize: on macOS
+    // /var/folders/... resolves to /private/var/folders/..., and production
+    // code calls fs::canonicalize on workspace roots before using them.
+    std::fs::canonicalize(&dir).unwrap()
 }
 
 fn profile(id: &str, skills_dir: &Path) -> AgentProfile {

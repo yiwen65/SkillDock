@@ -17,7 +17,8 @@ fn temp_dir(name: &str) -> PathBuf {
         unique
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    // See tests/git_operations.rs::temp_dir for the macOS symlink rationale.
+    std::fs::canonicalize(&dir).unwrap()
 }
 
 fn profile(id: &str, name: &str, skills_dir: &Path, enabled: bool) -> AgentProfile {
