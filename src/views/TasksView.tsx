@@ -17,7 +17,9 @@ function rawTaskLogs(task: TaskRecord) {
   return [
     task.stdout ? `--- stdout ---\n${task.stdout}` : "",
     task.stderr ? `--- stderr ---\n${task.stderr}` : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function LogBlock({ label, log }: { label: string; log: BoundedLog }) {
@@ -78,7 +80,9 @@ export function TasksView({
       } else if (refreshed === 0) {
         setMessage(`Failed to refresh task statuses (${failures} errors).`);
       } else {
-        setMessage(`Refreshed ${refreshed} of ${targets.length} task statuses (${failures} errors).`);
+        setMessage(
+          `Refreshed ${refreshed} of ${targets.length} task statuses (${failures} errors).`,
+        );
       }
     } finally {
       refreshAllBusyRef.current = false;
@@ -87,7 +91,12 @@ export function TasksView({
   };
 
   if (tasks.length === 0) {
-    return <EmptyState title="No task logs" body="Run a workspace operation (import, check, pull, install) to create logs." />;
+    return (
+      <EmptyState
+        title="No task logs"
+        body="Run a workspace operation (import, check, pull, install) to create logs."
+      />
+    );
   }
 
   return (
@@ -106,7 +115,12 @@ export function TasksView({
       {message && <p className="batch-message">{message}</p>}
       <div className="table-list">
         {tasks.map((task) => (
-          <TaskLogRow focused={task.id === focusedTaskId} key={task.id} onTaskChange={onTaskChange} task={task} />
+          <TaskLogRow
+            focused={task.id === focusedTaskId}
+            key={task.id}
+            onTaskChange={onTaskChange}
+            task={task}
+          />
         ))}
       </div>
     </section>
@@ -253,7 +267,9 @@ const TaskLogRow = React.memo(function TaskLogRow({
       ref={articleRef}
     >
       <div className="task-summary">
-        <h2>{logTask.kind} / {logTask.status}</h2>
+        <h2>
+          {logTask.kind} / {logTask.status}
+        </h2>
         <p>{logTask.summary}</p>
         {logTask.error && <p className="form-error">{logTask.error}</p>}
         {projectErrors.length > 0 && (
@@ -269,13 +285,34 @@ const TaskLogRow = React.memo(function TaskLogRow({
           </div>
         )}
         <div className="panel-actions">
-          <button className="secondary-button" disabled={rowBusy} onClick={refreshStatus} type="button">Refresh</button>
-          <button className="secondary-button" disabled={rowBusy} onClick={loadFullLogs} type="button">
+          <button
+            className="secondary-button"
+            disabled={rowBusy}
+            onClick={refreshStatus}
+            type="button"
+          >
+            Refresh
+          </button>
+          <button
+            className="secondary-button"
+            disabled={rowBusy}
+            onClick={loadFullLogs}
+            type="button"
+          >
             {expanded ? "Reload logs" : "Expand logs"}
           </button>
-          <button className="secondary-button" disabled={rowBusy} onClick={copyLogs} type="button">Copy raw</button>
+          <button className="secondary-button" disabled={rowBusy} onClick={copyLogs} type="button">
+            Copy raw
+          </button>
           {(logTask.status === "queued" || logTask.status === "running") && (
-            <button className="secondary-button" disabled={rowBusy} onClick={cancelQueuedTask} type="button">Cancel</button>
+            <button
+              className="secondary-button"
+              disabled={rowBusy}
+              onClick={cancelQueuedTask}
+              type="button"
+            >
+              Cancel
+            </button>
           )}
         </div>
         {message && <p className="batch-message">{message}</p>}

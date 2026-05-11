@@ -120,7 +120,10 @@ export function checkProjectUpdates(
   workspaceRoot: string,
   projectId: string,
 ): Promise<TaskOperationResult> {
-  return invokeCommand<TaskOperationResult>("check_project_updates_command", { workspaceRoot, projectId });
+  return invokeCommand<TaskOperationResult>("check_project_updates_command", {
+    workspaceRoot,
+    projectId,
+  });
 }
 
 export function checkAllProjectUpdates(workspaceRoot: string): Promise<TaskOperationResult> {
@@ -138,7 +141,10 @@ export function pullAllProjects(
   workspaceRoot: string,
   request: PullAllProjectsRequest,
 ): Promise<TaskOperationResult> {
-  return invokeCommand<TaskOperationResult>("pull_all_projects_command", { workspaceRoot, request });
+  return invokeCommand<TaskOperationResult>("pull_all_projects_command", {
+    workspaceRoot,
+    request,
+  });
 }
 
 export function previewLinkSkill(
@@ -159,14 +165,20 @@ export function previewLinkSkillsBatch(
   workspaceRoot: string,
   request: BatchLinkPreviewRequest,
 ): Promise<BatchLinkPreview> {
-  return invokeCommand<BatchLinkPreview>("preview_link_skills_batch_command", { workspaceRoot, request });
+  return invokeCommand<BatchLinkPreview>("preview_link_skills_batch_command", {
+    workspaceRoot,
+    request,
+  });
 }
 
 export function linkSkillsBatch(
   workspaceRoot: string,
   request: BatchLinkExecuteRequest,
 ): Promise<BatchLinkOperationResult> {
-  return invokeCommand<BatchLinkOperationResult>("link_skills_batch_command", { workspaceRoot, request });
+  return invokeCommand<BatchLinkOperationResult>("link_skills_batch_command", {
+    workspaceRoot,
+    request,
+  });
 }
 
 export function previewUnlinkSkill(

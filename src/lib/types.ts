@@ -277,12 +277,7 @@ export type GitStatus =
   | "fetch_failed"
   | "unknown";
 
-export type ProjectCategory =
-  | "skills"
-  | "plugins"
-  | "tools"
-  | "design_resources"
-  | "uncategorized";
+export type ProjectCategory = "skills" | "plugins" | "tools" | "design_resources" | "uncategorized";
 
 export type LinkMode = "symlink";
 
@@ -339,13 +334,7 @@ export type GitOperationErrorKind =
   | "workspace"
   | "io";
 
-export type TaskStatus =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "skipped"
-  | "failed"
-  | "cancelled";
+export type TaskStatus = "queued" | "running" | "succeeded" | "skipped" | "failed" | "cancelled";
 
 export type TaskKind =
   | "scan_workspace"

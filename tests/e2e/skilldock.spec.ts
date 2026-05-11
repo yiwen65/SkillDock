@@ -11,7 +11,9 @@ test.beforeEach(async ({ page }) => {
     browserFindings.push(`pageerror: ${error.message}`);
   });
   page.on("requestfailed", (request) => {
-    browserFindings.push(`requestfailed: ${request.method()} ${request.url()} ${request.failure()?.errorText}`);
+    browserFindings.push(
+      `requestfailed: ${request.method()} ${request.url()} ${request.failure()?.errorText}`,
+    );
   });
   page.on("response", (response) => {
     const status = response.status();
@@ -23,7 +25,8 @@ test.beforeEach(async ({ page }) => {
 
   test.info().annotations.push({
     type: "browser-findings",
-    description: "Console warnings/errors, page errors, failed requests and 4xx/5xx responses fail the test.",
+    description:
+      "Console warnings/errors, page errors, failed requests and 4xx/5xx responses fail the test.",
   });
 
   (page as Page & { __browserFindings?: string[] }).__browserFindings = browserFindings;
@@ -40,7 +43,9 @@ test("selects a workspace and validates the skills-centered MVP flow", async ({ 
   const brandIcon = page.locator(".brand-mark img");
   await expect(brandIcon).toBeVisible();
   await expect(brandIcon).toHaveAttribute("src", "/app-icon.png");
-  await expect.poll(() => brandIcon.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect
+    .poll(() => brandIcon.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
 
   await expect(page.getByRole("heading", { name: "Select workspace" })).toBeVisible();
   await page.getByRole("button", { name: "Open workspace" }).click();
@@ -79,7 +84,9 @@ test("selects a workspace and validates the skills-centered MVP flow", async ({ 
   await page.getByRole("button", { name: /^Preview$/ }).click();
   await expect(page.getByText("2 link targets previewed.")).toBeVisible();
   await page.getByRole("button", { name: "Execute safe" }).click();
-  await expect(page.getByText("Batch link: 1 linked, 1 already installed, 0 skipped, 0 failed.")).toBeVisible();
+  await expect(
+    page.getByText("Batch link: 1 linked, 1 already installed, 0 skipped, 0 failed."),
+  ).toBeVisible();
 });
 
 test("covers project import, update controls, filtering and hide metadata", async ({ page }) => {
@@ -126,7 +133,9 @@ test("covers project import, update controls, filtering and hide metadata", asyn
   await expect(page.getByRole("heading", { name: "Agent Skills" })).toBeHidden();
 });
 
-test("covers agent profile creation, missing directory creation and safe unlink", async ({ page }) => {
+test("covers agent profile creation, missing directory creation and safe unlink", async ({
+  page,
+}) => {
   await openMockWorkspace(page);
   await page.getByRole("button", { name: "Agents" }).click();
 
@@ -135,7 +144,9 @@ test("covers agent profile creation, missing directory creation and safe unlink"
   await page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Create directory" }).click();
   await expect(page.getByText("Missing Agent directory created.")).toBeVisible();
-  await expect(page.locator(".agent-row").filter({ hasText: "Missing Agent" })).toContainText("exists");
+  await expect(page.locator(".agent-row").filter({ hasText: "Missing Agent" })).toContainText(
+    "exists",
+  );
 
   await page.getByLabel("Profile id").fill("aider");
   await page.getByLabel("Name").fill("Aider");
@@ -223,28 +234,31 @@ async function expectSkillRowsToHaveStableLayout(page: Page) {
 
 async function expectSkillsFiltersToKeepCompactSpacing(page: Page) {
   await page.setViewportSize({ width: 1194, height: 868 });
-  const findings = await page.locator(".skills-view-grid > .data-panel").first().evaluate((panel) => {
-    const root = panel as HTMLElement;
-    const header = root.querySelector(".panel-header");
-    const filters = root.querySelector(".skill-filter-grid");
-    const search = root.querySelector(".skill-filter-grid label:nth-child(1)");
-    const project = root.querySelector(".skill-filter-grid label:nth-child(2)");
-    const status = root.querySelector(".skill-filter-grid label:nth-child(3)");
-    const rows = [
-      ["header to filters", header, filters, 32],
-      ["search to project", search, project, 32],
-      ["project to status", project, status, 32],
-    ] as const;
+  const findings = await page
+    .locator(".skills-view-grid > .data-panel")
+    .first()
+    .evaluate((panel) => {
+      const root = panel as HTMLElement;
+      const header = root.querySelector(".panel-header");
+      const filters = root.querySelector(".skill-filter-grid");
+      const search = root.querySelector(".skill-filter-grid label:nth-child(1)");
+      const project = root.querySelector(".skill-filter-grid label:nth-child(2)");
+      const status = root.querySelector(".skill-filter-grid label:nth-child(3)");
+      const rows = [
+        ["header to filters", header, filters, 32],
+        ["search to project", search, project, 32],
+        ["project to status", project, status, 32],
+      ] as const;
 
-    return rows.flatMap(([label, before, after, maxGap]) => {
-      if (!before || !after) {
-        return [`${label} missing element`];
-      }
+      return rows.flatMap(([label, before, after, maxGap]) => {
+        if (!before || !after) {
+          return [`${label} missing element`];
+        }
 
-      const gap = after.getBoundingClientRect().top - before.getBoundingClientRect().bottom;
-      return gap > maxGap ? [`${label} gap is ${gap}`] : [];
+        const gap = after.getBoundingClientRect().top - before.getBoundingClientRect().bottom;
+        return gap > maxGap ? [`${label} gap is ${gap}`] : [];
+      });
     });
-  });
 
   expect(findings).toEqual([]);
 }
@@ -377,7 +391,12 @@ function mockTauriBridge() {
     ),
   ];
 
-  const workspace: { root: string; projects: Project[]; skills: Skill[]; agentProfiles: AgentProfileState[] } = {
+  const workspace: {
+    root: string;
+    projects: Project[];
+    skills: Skill[];
+    agentProfiles: AgentProfileState[];
+  } = {
     root,
     projects: [
       {
@@ -498,7 +517,12 @@ function mockTauriBridge() {
     };
   }
 
-  function makeTask(kind: string, summary: string, stdout = "", projectOutcomes: Array<unknown> = []): TaskRecord {
+  function makeTask(
+    kind: string,
+    summary: string,
+    stdout = "",
+    projectOutcomes: Array<unknown> = [],
+  ): TaskRecord {
     taskId += 1;
     return {
       id: `task-${taskId}`,
@@ -512,7 +536,12 @@ function mockTauriBridge() {
     };
   }
 
-  function pushTask(kind: string, summary: string, stdout = "", projectOutcomes: Array<unknown> = []) {
+  function pushTask(
+    kind: string,
+    summary: string,
+    stdout = "",
+    projectOutcomes: Array<unknown> = [],
+  ) {
     const task = makeTask(kind, summary, stdout, projectOutcomes);
     tasks.unshift(task);
     return task;
@@ -559,7 +588,8 @@ function mockTauriBridge() {
     const linkName = request.linkName || skill.defaultLinkName;
     const targetPath = `${profile.skillsDir}/${linkName}`;
     const installed = skill.installedAgents.some(
-      (install) => install.agentProfileId === request.agentProfileId && install.linkName === linkName,
+      (install) =>
+        install.agentProfileId === request.agentProfileId && install.linkName === linkName,
     );
     return {
       skillId: skill.id,
@@ -567,7 +597,11 @@ function mockTauriBridge() {
       linkName,
       sourcePath: skill.absolutePath,
       targetPath,
-      status: installed ? "already_installed" : profile.exists && profile.writable ? "will_link" : "agent_path_missing",
+      status: installed
+        ? "already_installed"
+        : profile.exists && profile.writable
+          ? "will_link"
+          : "agent_path_missing",
     };
   }
 
@@ -585,7 +619,9 @@ function mockTauriBridge() {
     const skill = findSkill(preview.skillId);
     if (
       !skill.installedAgents.some(
-        (install) => install.agentProfileId === preview.agentProfileId && install.linkName === preview.linkName,
+        (install) =>
+          install.agentProfileId === preview.agentProfileId &&
+          install.linkName === preview.linkName,
       )
     ) {
       skill.installedAgents.push({
@@ -602,7 +638,8 @@ function mockTauriBridge() {
   function unlinkPreview(request: { agentProfileId: string; linkName: string }) {
     for (const skill of workspace.skills) {
       const install = skill.installedAgents.find(
-        (item) => item.agentProfileId === request.agentProfileId && item.linkName === request.linkName,
+        (item) =>
+          item.agentProfileId === request.agentProfileId && item.linkName === request.linkName,
       );
       if (install) {
         return {
@@ -635,7 +672,10 @@ function mockTauriBridge() {
           workspace.root = args.workspaceRoot;
           userConfig = {
             ...userConfig,
-            recentWorkspaces: [args.workspaceRoot, ...userConfig.recentWorkspaces.filter((path) => path !== args.workspaceRoot)],
+            recentWorkspaces: [
+              args.workspaceRoot,
+              ...userConfig.recentWorkspaces.filter((path) => path !== args.workspaceRoot),
+            ],
           };
           return clone(workspace);
         case "scan_workspace_command":
@@ -665,12 +705,21 @@ function mockTauriBridge() {
           executeLink(args.request.preview);
           const skill = findSkill(args.request.preview.skillId);
           const profile = findProfile(args.request.preview.agentProfileId);
-          const task = pushTask("link_skill", `Linked ${skill.name} into ${profile.profile.name}.`, "linked\n");
+          const task = pushTask(
+            "link_skill",
+            `Linked ${skill.name} into ${profile.profile.name}.`,
+            "linked\n",
+          );
           return { task: clone(task), workspace: clone(workspace) };
         }
         case "preview_link_skills_batch_command":
           return {
-            previews: clone(args.request.items.map((request: { skillId: string; agentProfileId: string; linkName?: string }) => linkPreview(request))),
+            previews: clone(
+              args.request.items.map(
+                (request: { skillId: string; agentProfileId: string; linkName?: string }) =>
+                  linkPreview(request),
+              ),
+            ),
           };
         case "link_skills_batch_command": {
           let linked = 0;
@@ -688,7 +737,12 @@ function mockTauriBridge() {
           }
           const summary = { linked, alreadyInstalled, skipped, failed: 0 };
           const task = pushTask("link_skills_batch", "Batch link completed.", "batch linked\n");
-          return { task: clone(task), workspace: clone(workspace), summary, previews: clone(args.request.previews) };
+          return {
+            task: clone(task),
+            workspace: clone(workspace),
+            summary,
+            previews: clone(args.request.previews),
+          };
         }
         case "preview_unlink_skill_command":
           return clone(unlinkPreview(args.request));
@@ -698,7 +752,11 @@ function mockTauriBridge() {
           for (const skill of workspace.skills) {
             const before = skill.installedAgents.length;
             skill.installedAgents = skill.installedAgents.filter(
-              (install) => !(install.agentProfileId === preview.agentProfileId && install.linkName === preview.linkName),
+              (install) =>
+                !(
+                  install.agentProfileId === preview.agentProfileId &&
+                  install.linkName === preview.linkName
+                ),
             );
             if (skill.installedAgents.length !== before) {
               skillName = skill.name;
@@ -706,7 +764,11 @@ function mockTauriBridge() {
           }
           syncAgentCounts();
           const profile = findProfile(preview.agentProfileId);
-          const task = pushTask("unlink_skill", `Unlinked ${preview.linkName} from ${profile.profile.name}.`, "unlinked\n");
+          const task = pushTask(
+            "unlink_skill",
+            `Unlinked ${preview.linkName} from ${profile.profile.name}.`,
+            "unlinked\n",
+          );
           return { task: clone(task), workspace: clone(workspace), skillName };
         }
         case "load_workspace_config_command":
@@ -735,13 +797,24 @@ function mockTauriBridge() {
           return clone(args.config);
         case "import_project_command": {
           const request = args.request;
-          const directoryName = request.directoryName || String(request.source).split("/").pop()?.replace(/\.git$/, "") || "imported";
+          const directoryName =
+            request.directoryName ||
+            String(request.source)
+              .split("/")
+              .pop()
+              ?.replace(/\.git$/, "") ||
+            "imported";
           workspace.projects.push({
             id: directoryName,
             name: directoryName,
             path: `${workspace.root}/${directoryName}`,
-            remoteUrl: request.source.includes("://") ? request.source : `https://github.com/${request.source}.git`,
-            provider: request.source.includes("github.com") || /^[^/]+\/[^/]+$/.test(request.source) ? "github" : "unknown",
+            remoteUrl: request.source.includes("://")
+              ? request.source
+              : `https://github.com/${request.source}.git`,
+            provider:
+              request.source.includes("github.com") || /^[^/]+\/[^/]+$/.test(request.source)
+                ? "github"
+                : "unknown",
             branch: "main",
             upstream: "origin/main",
             gitStatus: "up_to_date",
@@ -755,24 +828,46 @@ function mockTauriBridge() {
             favorite: false,
             tags: [],
           });
-          const task = pushTask("import_project", `Imported ${request.source} into ${directoryName}.`, "git clone\n");
+          const task = pushTask(
+            "import_project",
+            `Imported ${request.source} into ${directoryName}.`,
+            "git clone\n",
+          );
           return { task: clone(task), workspace: clone(workspace) };
         }
         case "check_all_project_updates_command": {
-          const task = pushTask("fetch_project", `Checked ${workspace.projects.length} projects.`, "git fetch --prune\n");
+          const task = pushTask(
+            "fetch_project",
+            `Checked ${workspace.projects.length} projects.`,
+            "git fetch --prune\n",
+          );
           return { task: clone(task), workspace: clone(workspace) };
         }
         case "pull_all_projects_command": {
-          const count = args.request.safeProjectIds?.length ?? workspace.projects.filter((project) => project.pullAllEligible).length;
-          const task = pushTask("sync_all_projects", `Pulled ${count} eligible projects.`, "git pull --ff-only --prune\n");
+          const count =
+            args.request.safeProjectIds?.length ??
+            workspace.projects.filter((project) => project.pullAllEligible).length;
+          const task = pushTask(
+            "sync_all_projects",
+            `Pulled ${count} eligible projects.`,
+            "git pull --ff-only --prune\n",
+          );
           return { task: clone(task), workspace: clone(workspace) };
         }
         case "check_project_updates_command": {
-          const task = pushTask("fetch_project", `Checked ${args.projectId}.`, "git fetch --prune\n");
+          const task = pushTask(
+            "fetch_project",
+            `Checked ${args.projectId}.`,
+            "git fetch --prune\n",
+          );
           return { task: clone(task), workspace: clone(workspace) };
         }
         case "pull_project_command": {
-          const task = pushTask("pull_project", `Pulled ${args.request.projectId}.`, "git pull --ff-only --prune\n");
+          const task = pushTask(
+            "pull_project",
+            `Pulled ${args.request.projectId}.`,
+            "git pull --ff-only --prune\n",
+          );
           return { task: clone(task), workspace: clone(workspace) };
         }
         case "create_agent_profile_dir_command": {
@@ -785,7 +880,9 @@ function mockTauriBridge() {
           return clone(userConfig);
         case "save_agent_profiles_command":
           workspace.agentProfiles = args.profiles.map((profile: AgentProfile) => {
-            const existing = workspace.agentProfiles.find((state) => state.profile.id === profile.id);
+            const existing = workspace.agentProfiles.find(
+              (state) => state.profile.id === profile.id,
+            );
             return existing
               ? { ...existing, profile, skillsDir: profile.skillsDir }
               : profileState(profile, false);

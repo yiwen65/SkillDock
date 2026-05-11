@@ -213,37 +213,86 @@ export function ProjectsView({
                   />
                 </label>
                 <label className="inline-check">
-                  <input checked={shallow} onChange={(event) => setShallow(event.target.checked)} type="checkbox" />
+                  <input
+                    checked={shallow}
+                    onChange={(event) => setShallow(event.target.checked)}
+                    type="checkbox"
+                  />
                   <span>Shallow clone</span>
                 </label>
               </div>
             </details>
             <div className="panel-actions">
-              <button className="primary-button" type="submit">Import</button>
-              <button className="secondary-button" onClick={() => setImportOpen(false)} type="button">Cancel</button>
+              <button className="primary-button" type="submit">
+                Import
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => setImportOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
             </div>
           </form>
         </div>
       )}
       <section className="data-panel">
-        <PanelHeader title="Projects" detail={`${visibleProjects.length} of ${projects.length} repositories`} />
+        <PanelHeader
+          title="Projects"
+          detail={`${visibleProjects.length} of ${projects.length} repositories`}
+        />
         <div className="panel-actions">
-          <button className="primary-button" disabled={operationBusy} onClick={() => setImportOpen(true)} type="button">Import</button>
-          <button className="secondary-button" disabled={operationBusy} onClick={onCheckAll} type="button">Check all</button>
-          <button className="secondary-button" disabled={operationBusy} onClick={() => onPullAll(autostash)} type="button">Pull safe</button>
+          <button
+            className="primary-button"
+            disabled={operationBusy}
+            onClick={() => setImportOpen(true)}
+            type="button"
+          >
+            Import
+          </button>
+          <button
+            className="secondary-button"
+            disabled={operationBusy}
+            onClick={onCheckAll}
+            type="button"
+          >
+            Check all
+          </button>
+          <button
+            className="secondary-button"
+            disabled={operationBusy}
+            onClick={() => onPullAll(autostash)}
+            type="button"
+          >
+            Pull safe
+          </button>
           <label className="inline-check">
-            <input checked={autostash} onChange={(event) => setAutostash(event.target.checked)} type="checkbox" />
+            <input
+              checked={autostash}
+              onChange={(event) => setAutostash(event.target.checked)}
+              type="checkbox"
+            />
             <span>Autostash</span>
           </label>
         </div>
         <div className="filter-bar">
           <label>
             <span>Filter</span>
-            <input onChange={(event) => setQuery(event.target.value)} placeholder="Name, remote, branch" value={query} />
+            <input
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Name, remote, branch"
+              value={query}
+            />
           </label>
           <label>
             <span>Status</span>
-            <select onChange={(event) => setStatusFilter(event.target.value as "all" | Project["gitStatus"])} value={statusFilter}>
+            <select
+              onChange={(event) =>
+                setStatusFilter(event.target.value as "all" | Project["gitStatus"])
+              }
+              value={statusFilter}
+            >
               <option value="all">All statuses ({projects.length})</option>
               {statusOptions.map((status) => (
                 <option key={status} value={status}>
@@ -254,7 +303,12 @@ export function ProjectsView({
           </label>
           <label>
             <span>Visibility</span>
-            <select onChange={(event) => setHiddenFilter(event.target.value as "visible" | "all" | "hidden")} value={hiddenFilter}>
+            <select
+              onChange={(event) =>
+                setHiddenFilter(event.target.value as "visible" | "all" | "hidden")
+              }
+              value={hiddenFilter}
+            >
               <option value="visible">Visible projects</option>
               <option value="all">All projects</option>
               <option value="hidden">Hidden only</option>
@@ -263,9 +317,15 @@ export function ProjectsView({
         </div>
         {message && <p className="batch-message">{message}</p>}
         {projects.length === 0 ? (
-          <EmptyState title="No projects found" body="Import or refresh after adding top-level Git repositories." />
+          <EmptyState
+            title="No projects found"
+            body="Import or refresh after adding top-level Git repositories."
+          />
         ) : visibleProjects.length === 0 ? (
-          <EmptyState title="No matching projects" body="Adjust filters to show more repositories." />
+          <EmptyState
+            title="No matching projects"
+            body="Adjust filters to show more repositories."
+          />
         ) : (
           <div className="table-list">
             {visibleProjects.map((project) => {
@@ -278,7 +338,10 @@ export function ProjectsView({
                     </div>
                     <p>{project.remoteUrl || project.path}</p>
                   </div>
-                  <div className="project-insights" aria-label={`Project summary for ${project.name}`}>
+                  <div
+                    className="project-insights"
+                    aria-label={`Project summary for ${project.name}`}
+                  >
                     <div className="project-insight">
                       <span>Skills</span>
                       <strong>{project.skillCount}</strong>
@@ -307,9 +370,30 @@ export function ProjectsView({
                     </div>
                   </div>
                   <div className="row-actions">
-                    <button className="secondary-button" disabled={operationBusy} onClick={() => onCheckProject(project.id)} type="button">Check</button>
-                    <button className="secondary-button" disabled={operationBusy} onClick={() => onPullProject(project.id, autostash)} type="button">Pull</button>
-                    <button className="secondary-button" disabled={rowActionBusy} onClick={() => openProjectPath(project)} type="button">Open project</button>
+                    <button
+                      className="secondary-button"
+                      disabled={operationBusy}
+                      onClick={() => onCheckProject(project.id)}
+                      type="button"
+                    >
+                      Check
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={operationBusy}
+                      onClick={() => onPullProject(project.id, autostash)}
+                      type="button"
+                    >
+                      Pull
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={rowActionBusy}
+                      onClick={() => openProjectPath(project)}
+                      type="button"
+                    >
+                      Open project
+                    </button>
                     <button
                       className="secondary-button"
                       disabled={rowActionBusy || operationBusy}

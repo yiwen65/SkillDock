@@ -6,7 +6,6 @@ import {
   importProject,
   loadUserConfig,
   loadWorkspaceConfig,
-  openWorkspacePath,
   pullAllProjects,
   pullProject,
   recentTaskRecords,
@@ -82,7 +81,9 @@ function App() {
         ? loadState.workspace
         : undefined;
   const workspacePath =
-      readyWorkspace && readyWorkspace.root.length > 0 ? readyWorkspace.root : "No workspace selected";
+    readyWorkspace && readyWorkspace.root.length > 0
+      ? readyWorkspace.root
+      : "No workspace selected";
 
   const setTrackedLoadState = (next: LoadState | ((current: LoadState) => LoadState)) => {
     setLoadState((current) => {
@@ -144,8 +145,7 @@ function App() {
     applyThemePreference(themePreference);
     // Mirror to the OS title bar so Windows dark mode and macOS appearance
     // follow the in-app preference. "system" maps to null (follow OS).
-    const osTheme: "light" | "dark" | null =
-      themePreference === "system" ? null : themePreference;
+    const osTheme: "light" | "dark" | null = themePreference === "system" ? null : themePreference;
     void setWindowTheme(osTheme);
   }, [themePreference]);
 
@@ -193,20 +193,24 @@ function App() {
     refreshRecentTasks();
 
     // Listen for real-time task updates from the backend
-    void import("@tauri-apps/api/event").then(({ listen }) => {
-      if (cancelled) return;
-      listen<TaskRecord>("task-update", (event) => {
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) => {
         if (cancelled) return;
-        const record = event.payload;
-        if (record.workspaceRoot && record.workspaceRoot !== readyWorkspace.root) return;
-        setTaskHistory((tasks) => mergeTaskRecords([record], tasks));
-        refreshWorkspaceAfterTerminalProjectTask(record);
-      }).then((fn) => {
-        unlisten = fn;
-      }).catch(() => {
-        // No Tauri bridge (Vite-only mode) — rely on polling
-      });
-    }).catch(() => {});
+        listen<TaskRecord>("task-update", (event) => {
+          if (cancelled) return;
+          const record = event.payload;
+          if (record.workspaceRoot && record.workspaceRoot !== readyWorkspace.root) return;
+          setTaskHistory((tasks) => mergeTaskRecords([record], tasks));
+          refreshWorkspaceAfterTerminalProjectTask(record);
+        })
+          .then((fn) => {
+            unlisten = fn;
+          })
+          .catch(() => {
+            // No Tauri bridge (Vite-only mode) — rely on polling
+          });
+      })
+      .catch(() => {});
 
     return () => {
       cancelled = true;
@@ -223,7 +227,10 @@ function App() {
     if (chooseWorkspaceBusyRef.current) return;
     const requestedPath = workspaceInput.trim();
     if (requestedPath.length === 0) {
-      setTrackedLoadState({ status: "needs-workspace", message: "Enter a workspace directory path." });
+      setTrackedLoadState({
+        status: "needs-workspace",
+        message: "Enter a workspace directory path.",
+      });
       return;
     }
 
@@ -471,7 +478,11 @@ function App() {
           </div>
         </header>
 
-        {operationMessage && <div className="operation-banner" role="status">{operationMessage}</div>}
+        {operationMessage && (
+          <div className="operation-banner" role="status">
+            {operationMessage}
+          </div>
+        )}
 
         <section className="content" aria-live="polite">
           {loadState.status === "loading" && (
@@ -490,58 +501,58 @@ function App() {
           )}
           {readyWorkspace && (
             <Suspense fallback={null}>
-            <CoreViewLazy
-              activeView={activeView}
-              onCheckAll={() =>
-                runWorkspaceOperation("Checking updates", (workspace) =>
-                  checkAllProjectUpdates(workspace.root),
-                )
-              }
-              onCheckProject={(projectId) =>
-                runWorkspaceOperation(`Checking ${projectId}`, (workspace) =>
-                  checkProjectUpdates(workspace.root, projectId),
-                )
-              }
-              onImport={(source, directoryName, shallow) =>
-                runWorkspaceOperation("Importing repository", (workspace) =>
-                  importProject(workspace.root, {
-                    source,
-                    directoryName: directoryName || undefined,
-                    shallow,
-                  }),
-                )
-              }
-              onPullAll={(autostash) =>
-                runWorkspaceOperation("Pulling projects", (workspace) =>
-                  pullAllProjects(workspace.root, {
-                    autostash,
-                    safeProjectIds: workspace.projects
-                      .filter((project) => project.pullAllEligible)
-                      .map((project) => project.id),
-                  }),
-                )
-              }
-              onPullProject={(projectId, autostash) =>
-                runWorkspaceOperation(`Pulling ${projectId}`, (workspace) =>
-                  pullProject(workspace.root, { projectId, autostash }),
-                )
-              }
-              focusedTaskId={focusedTaskId}
-              taskHistory={taskHistory}
-              onOpenTaskLog={(taskId) => {
-                setFocusedTaskId(taskId);
-                setActiveView("Logs");
-              }}
-              onCreateAgentDir={createMissingAgentDir}
-              onBatchLinkResult={applyBatchLinkResult}
-              onOperationResult={applyOperationResult}
-              onThemePreferenceChange={setThemePreference}
-              onWorkspaceChange={applyWorkspaceChange}
-              onTaskChange={updateTaskRecord}
-              onSetProjectHidden={setProjectHidden}
-              operationBusy={operationBusy}
-              workspace={readyWorkspace}
-            />
+              <CoreViewLazy
+                activeView={activeView}
+                onCheckAll={() =>
+                  runWorkspaceOperation("Checking updates", (workspace) =>
+                    checkAllProjectUpdates(workspace.root),
+                  )
+                }
+                onCheckProject={(projectId) =>
+                  runWorkspaceOperation(`Checking ${projectId}`, (workspace) =>
+                    checkProjectUpdates(workspace.root, projectId),
+                  )
+                }
+                onImport={(source, directoryName, shallow) =>
+                  runWorkspaceOperation("Importing repository", (workspace) =>
+                    importProject(workspace.root, {
+                      source,
+                      directoryName: directoryName || undefined,
+                      shallow,
+                    }),
+                  )
+                }
+                onPullAll={(autostash) =>
+                  runWorkspaceOperation("Pulling projects", (workspace) =>
+                    pullAllProjects(workspace.root, {
+                      autostash,
+                      safeProjectIds: workspace.projects
+                        .filter((project) => project.pullAllEligible)
+                        .map((project) => project.id),
+                    }),
+                  )
+                }
+                onPullProject={(projectId, autostash) =>
+                  runWorkspaceOperation(`Pulling ${projectId}`, (workspace) =>
+                    pullProject(workspace.root, { projectId, autostash }),
+                  )
+                }
+                focusedTaskId={focusedTaskId}
+                taskHistory={taskHistory}
+                onOpenTaskLog={(taskId) => {
+                  setFocusedTaskId(taskId);
+                  setActiveView("Logs");
+                }}
+                onCreateAgentDir={createMissingAgentDir}
+                onBatchLinkResult={applyBatchLinkResult}
+                onOperationResult={applyOperationResult}
+                onThemePreferenceChange={setThemePreference}
+                onWorkspaceChange={applyWorkspaceChange}
+                onTaskChange={updateTaskRecord}
+                onSetProjectHidden={setProjectHidden}
+                operationBusy={operationBusy}
+                workspace={readyWorkspace}
+              />
             </Suspense>
           )}
         </section>
