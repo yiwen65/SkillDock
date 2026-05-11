@@ -131,7 +131,6 @@ export function SettingsView({
     setBusy(true);
     setMessage("Saving settings...");
     const patch = {
-      recentWorkspaces: config.recentWorkspaces,
       automaticChecks: {
         ...config.automaticChecks,
         intervalMinutes: clampAutomaticCheckInterval(config.automaticChecks.intervalMinutes),

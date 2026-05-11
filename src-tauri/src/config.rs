@@ -16,6 +16,7 @@ const WORKSPACE_CONFIG_FILE: &str = "config.json";
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceConfig {
     pub schema_version: u32,
+    #[serde(default)]
     pub projects: Vec<WorkspaceProjectMetadata>,
 }
 
@@ -32,13 +33,21 @@ impl Default for WorkspaceConfig {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceProjectMetadata {
     pub project_id: String,
+    #[serde(default)]
     pub display_name: Option<String>,
+    #[serde(default)]
     pub category: Option<ProjectCategory>,
+    #[serde(default)]
     pub favorite: bool,
+    #[serde(default)]
     pub hidden: bool,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
     pub notes: Option<String>,
+    #[serde(default)]
     pub auto_check: Option<bool>,
+    #[serde(default)]
     pub auto_pull: Option<bool>,
 }
 
@@ -46,11 +55,37 @@ pub struct WorkspaceProjectMetadata {
 #[serde(rename_all = "camelCase")]
 pub struct UserConfig {
     pub schema_version: u32,
+    #[serde(default)]
     pub recent_workspaces: Vec<String>,
+    #[serde(default = "default_agent_profiles")]
     pub agent_profiles: Vec<AgentProfile>,
+    #[serde(default)]
     pub ui_preferences: UiPreferences,
+    #[serde(default)]
     pub window_size: WindowSize,
+    #[serde(default)]
     pub automatic_checks: AutomaticCheckSettings,
+}
+
+fn default_agent_profiles() -> Vec<AgentProfile> {
+    vec![
+        AgentProfile {
+            id: "claude-code".to_string(),
+            name: "Claude Code".to_string(),
+            skills_dir: "~/.claude/skills".to_string(),
+            enabled: true,
+            built_in: true,
+            link_mode: LinkMode::Symlink,
+        },
+        AgentProfile {
+            id: "codex".to_string(),
+            name: "Codex".to_string(),
+            skills_dir: "~/.codex/skills".to_string(),
+            enabled: true,
+            built_in: true,
+            link_mode: LinkMode::Symlink,
+        },
+    ]
 }
 
 impl Default for UserConfig {
@@ -58,24 +93,7 @@ impl Default for UserConfig {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             recent_workspaces: Vec::new(),
-            agent_profiles: vec![
-                AgentProfile {
-                    id: "claude-code".to_string(),
-                    name: "Claude Code".to_string(),
-                    skills_dir: "~/.claude/skills".to_string(),
-                    enabled: true,
-                    built_in: true,
-                    link_mode: LinkMode::Symlink,
-                },
-                AgentProfile {
-                    id: "codex".to_string(),
-                    name: "Codex".to_string(),
-                    skills_dir: "~/.codex/skills".to_string(),
-                    enabled: true,
-                    built_in: true,
-                    link_mode: LinkMode::Symlink,
-                },
-            ],
+            agent_profiles: default_agent_profiles(),
             ui_preferences: UiPreferences::default(),
             window_size: WindowSize::default(),
             automatic_checks: AutomaticCheckSettings::default(),
@@ -86,8 +104,11 @@ impl Default for UserConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiPreferences {
+    #[serde(default)]
     pub theme: ThemePreference,
+    #[serde(default)]
     pub project_sort: ProjectSort,
+    #[serde(default)]
     pub show_hidden_projects: bool,
 }
 
@@ -109,6 +130,12 @@ pub enum ThemePreference {
     Dark,
 }
 
+impl Default for ThemePreference {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectSort {
@@ -117,7 +144,13 @@ pub enum ProjectSort {
     SkillCount,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+impl Default for ProjectSort {
+    fn default() -> Self {
+        Self::Name
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowSize {
     pub width: u32,
@@ -136,16 +169,23 @@ impl Default for WindowSize {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomaticCheckSettings {
+    #[serde(default)]
     pub enabled: bool,
+    #[serde(default = "default_check_interval_minutes")]
     pub interval_minutes: u32,
+    #[serde(default)]
     pub pull_after_check: bool,
+}
+
+fn default_check_interval_minutes() -> u32 {
+    60
 }
 
 impl Default for AutomaticCheckSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            interval_minutes: 60,
+            interval_minutes: default_check_interval_minutes(),
             pull_after_check: false,
         }
     }
@@ -154,7 +194,6 @@ impl Default for AutomaticCheckSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserPreferencesPatch {
-    pub recent_workspaces: Vec<String>,
     pub ui_preferences: UiPreferences,
     pub automatic_checks: AutomaticCheckSettings,
 }
@@ -262,7 +301,6 @@ pub fn patch_user_preferences_at(
     patch: UserPreferencesPatch,
 ) -> Result<UserConfig, ConfigError> {
     let mut config = load_user_config_at(config_path.as_ref())?;
-    config.recent_workspaces = patch.recent_workspaces;
     config.ui_preferences = patch.ui_preferences;
     config.automatic_checks = patch.automatic_checks;
     save_user_config_at(config_path.as_ref(), &config)?;
@@ -271,6 +309,38 @@ pub fn patch_user_preferences_at(
 
 pub fn patch_user_preferences(patch: UserPreferencesPatch) -> Result<UserConfig, ConfigError> {
     patch_user_preferences_at(default_user_config_path(), patch)
+}
+
+/// Minimum window edge we'll persist. Anything smaller usually means the
+/// window was minimised or emitted a bogus resize event during teardown, and
+/// replaying it on next launch would leave the window effectively unusable.
+pub const MIN_PERSISTED_WINDOW_EDGE: u32 = 200;
+
+/// Persist the current window size without touching unrelated preferences.
+/// Returns `Ok(None)` when the edge values are below `MIN_PERSISTED_WINDOW_EDGE`,
+/// signalling the caller should ignore the event instead of clobbering a good
+/// saved size with a minimised or spurious measurement.
+pub fn update_window_size_at(
+    config_path: impl AsRef<Path>,
+    width: u32,
+    height: u32,
+) -> Result<Option<WindowSize>, ConfigError> {
+    if width < MIN_PERSISTED_WINDOW_EDGE || height < MIN_PERSISTED_WINDOW_EDGE {
+        return Ok(None);
+    }
+
+    let mut config = load_user_config_at(config_path.as_ref())?;
+    let next = WindowSize { width, height };
+    if config.window_size == next {
+        return Ok(Some(next));
+    }
+    config.window_size = next;
+    save_user_config_at(config_path.as_ref(), &config)?;
+    Ok(Some(next))
+}
+
+pub fn update_window_size(width: u32, height: u32) -> Result<Option<WindowSize>, ConfigError> {
+    update_window_size_at(default_user_config_path(), width, height)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]

@@ -11,6 +11,10 @@ use crate::{
 
 pub const SKILL_MARKDOWN_PREVIEW_MAX_BYTES: usize = 16 * 1024;
 
+/// Cap for `UserConfig.recent_workspaces`. Past this, the oldest entries are
+/// dropped so the list cannot grow without bound as users open new roots.
+pub const MAX_RECENT_WORKSPACES: usize = 20;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceError {
@@ -294,4 +298,9 @@ fn remember_recent_workspace(user_config: &mut UserConfig, workspace_root: &Path
         .recent_workspaces
         .retain(|recent| recent != &root);
     user_config.recent_workspaces.insert(0, root);
+    if user_config.recent_workspaces.len() > MAX_RECENT_WORKSPACES {
+        user_config
+            .recent_workspaces
+            .truncate(MAX_RECENT_WORKSPACES);
+    }
 }

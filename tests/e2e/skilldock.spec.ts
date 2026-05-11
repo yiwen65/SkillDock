@@ -896,7 +896,6 @@ function mockTauriBridge() {
         case "patch_user_preferences_command":
           userConfig = {
             ...userConfig,
-            recentWorkspaces: args.patch.recentWorkspaces,
             uiPreferences: args.patch.uiPreferences,
             automaticChecks: args.patch.automaticChecks,
           };

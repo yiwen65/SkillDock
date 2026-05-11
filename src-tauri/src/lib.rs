@@ -29,10 +29,44 @@ fn health_check_command() -> Workspace {
 #[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri::{Manager, WindowEvent};
+
     tauri::Builder::default()
         .setup(|app| {
             set_app_handle(app.handle().clone());
+
+            // Restore the last saved window size. Errors are non-fatal: the
+            // Tauri-configured defaults already produce a usable window.
+            if let Ok(config) = load_user_config() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_size(tauri::LogicalSize::new(
+                        config.window_size.width,
+                        config.window_size.height,
+                    ));
+                }
+            }
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if !matches!(event, WindowEvent::CloseRequested { .. }) {
+                return;
+            }
+            // Capture logical size so the value is stable across DPI changes.
+            let Ok(physical) = window.inner_size() else {
+                return;
+            };
+            let scale = window.scale_factor().unwrap_or(1.0);
+            if !scale.is_finite() || scale <= 0.0 {
+                return;
+            }
+            let width = (f64::from(physical.width) / scale).round();
+            let height = (f64::from(physical.height) / scale).round();
+            if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+                return;
+            }
+            // Swallow errors: persisting window size must never block shutdown.
+            let _ = update_window_size(width as u32, height as u32);
         })
         .invoke_handler(tauri::generate_handler![
             health_check_command,

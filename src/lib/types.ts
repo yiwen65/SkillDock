@@ -242,7 +242,6 @@ export type UserConfig = {
 };
 
 export type UserPreferencesPatch = {
-  recentWorkspaces: string[];
   uiPreferences: UiPreferences;
   automaticChecks: AutomaticCheckSettings;
 };
