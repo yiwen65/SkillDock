@@ -155,4 +155,10 @@ MVP in progress. See [docs/skilldock-tasks.md](docs/skilldock-tasks.md) for the 
 
 ## License
 
-No explicit license is declared yet — evaluate before use. A `LICENSE` file will be added before the first public release.
+SkillDock is released under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). In short:
+
+- **Permitted**: personal use, research, study, hobby projects, and any other noncommercial purpose.
+- **Permitted**: use by charities, schools, universities, public research / health / safety / environmental / government bodies.
+- **Not permitted**: any commercial use. If you want to use SkillDock commercially, please open an issue or contact the authors for a separate commercial arrangement.
+
+This license is **source-available, not open source** (it intentionally restricts commercial use, which the OSI Open Source Definition does not allow). See the full license text in [`LICENSE.md`](LICENSE.md).
