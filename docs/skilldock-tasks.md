@@ -1,8 +1,8 @@
-# Skills Collection App Task Breakdown
+# SkillDock Task Breakdown
 
 ## Overview
 
-These tasks implement the MVP from [docs/skills-collection-app.md](skills-collection-app.md) through the plan in [docs/skills-collection-app-implementation-plan.md](skills-collection-app-implementation-plan.md). Tasks are sized as 1-2 day slices where possible and ordered by dependency.
+These tasks implement the MVP from [docs/skilldock.md](skilldock.md) through the plan in [docs/skilldock-implementation-plan.md](skilldock-implementation-plan.md). Tasks are sized as 1-2 day slices where possible and ordered by dependency.
 
 ## Task Index
 
@@ -34,7 +34,7 @@ These tasks implement the MVP from [docs/skills-collection-app.md](skills-collec
 
 ### Context
 
-Part of the implementation for [Skills Collection App](skills-collection-app.md). This creates the `app/` project described in the spec.
+Part of the implementation for [SkillDock](skilldock.md). This creates the `app/` project described in the spec.
 
 ### Description
 
@@ -89,7 +89,7 @@ Prefer stable snake_case JSON values for enum variants that already appear in th
 
 ### Context
 
-The app uses workspace config at `<workspace>/.skills-collection/config.json` and user app config for recent workspace, profiles and UI preferences.
+The app uses workspace config at `<workspace>/.skilldock/config.json` and user app config for recent workspace, profiles and UI preferences.
 
 ### Description
 
@@ -128,7 +128,7 @@ Add startup behavior and UI flow for selecting, validating and remembering a col
 
 - [x] First launch prompts for a workspace directory.
 - [x] Later launches restore the recent workspace if it still exists.
-- [x] Empty directories can be initialized with `.skills-collection/config.json`.
+- [x] Empty directories can be initialized with `.skilldock/config.json`.
 - [x] Existing directories can be selected and scanned without requiring the root itself to be a Git repo.
 - [x] Invalid paths produce a clear UI error.
 

@@ -1,4 +1,4 @@
-use skills_collection_app_lib::{
+use skilldock_lib::{
     bounded_task_log, TaskKind, TaskOutcome, TaskQueue, TaskStatus, TASK_LOG_MAX_BYTES,
     TASK_RECORD_MAX_RETAINED,
 };

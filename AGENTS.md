@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This is a desktop skills collection manager built with React, Vite, TypeScript, and Tauri.
+SkillDock is a desktop app for managing a local collection of agent skills, built with React, Vite, TypeScript, and Tauri.
 
 - `src/` contains the frontend. `src/App.tsx` holds the main UI, `src/main.tsx` boots React, `src/lib/commands.ts` wraps Tauri calls, and `src/lib/types.ts` defines shared frontend types.
 - `src/styles.css` contains global styling for the app.

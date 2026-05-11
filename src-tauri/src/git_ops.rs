@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    is_pull_all_eligible, load_user_config, run_workspace_task_blocking, scan_workspace_at,
-    AgentProfile, GitStatus, ImportProjectRequest, Project, ProjectTaskRecord,
-    PullAllProjectsRequest, PullProjectRequest, TaskKind, TaskOperationResult, TaskOutcome,
-    TaskStatus, Workspace, WorkspaceError,
+    is_pull_all_eligible, load_user_config, run_workspace_task_background,
+    run_workspace_task_blocking, scan_workspace_at, AgentProfile, ConfigError, GitStatus,
+    ImportProjectRequest, Project, ProjectTaskRecord, PullAllProjectsRequest, PullProjectRequest,
+    TaskKind, TaskOperationResult, TaskOutcome, TaskStatus, Workspace, WorkspaceError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +50,14 @@ impl GitOperationError {
     fn workspace(error: WorkspaceError) -> Self {
         Self {
             kind: GitOperationErrorKind::Workspace,
+            path: Some(error.path),
+            message: error.message,
+        }
+    }
+
+    fn config(error: ConfigError) -> Self {
+        Self {
+            kind: GitOperationErrorKind::Io,
             path: Some(error.path),
             message: error.message,
         }
@@ -186,16 +194,12 @@ pub fn import_project_at(
     Ok(TaskOperationResult { task, workspace })
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn import_project_command(
     workspace_root: String,
     request: ImportProjectRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let user_config = load_user_config().map_err(|error| GitOperationError {
-        kind: GitOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(GitOperationError::config)?;
     import_project_at(workspace_root, &user_config.agent_profiles, request)
 }
 
@@ -204,12 +208,29 @@ pub fn check_project_updates_at(
     agent_profiles: &[AgentProfile],
     project_id: &str,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    run_project_git_task(
+    run_project_git_task_with_mode(
         workspace_root,
         agent_profiles,
         TaskKind::FetchProject,
         format!("Check updates for {project_id}"),
         project_id.to_string(),
+        ProjectTaskMode::Blocking,
+        |project, context| fetch_project(project, context),
+    )
+}
+
+pub fn check_project_updates_background_at(
+    workspace_root: impl AsRef<Path>,
+    agent_profiles: &[AgentProfile],
+    project_id: &str,
+) -> Result<TaskOperationResult, GitOperationError> {
+    run_project_git_task_with_mode(
+        workspace_root,
+        agent_profiles,
+        TaskKind::FetchProject,
+        format!("Check updates for {project_id}"),
+        project_id.to_string(),
+        ProjectTaskMode::Background,
         |project, context| fetch_project(project, context),
     )
 }
@@ -227,18 +248,50 @@ pub fn check_all_project_updates_at(
     )
 }
 
+pub fn check_all_project_updates_background_at(
+    workspace_root: impl AsRef<Path>,
+    agent_profiles: &[AgentProfile],
+) -> Result<TaskOperationResult, GitOperationError> {
+    run_all_project_git_task_with_mode(
+        workspace_root,
+        agent_profiles,
+        TaskKind::SyncAllProjects,
+        "Check updates for all projects",
+        AllProjectTaskMode::Background,
+        |project, context| fetch_project(project, context),
+    )
+}
+
 pub fn pull_project_at(
     workspace_root: impl AsRef<Path>,
     agent_profiles: &[AgentProfile],
     request: PullProjectRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
     let autostash = request.autostash;
-    run_project_git_task(
+    run_project_git_task_with_mode(
         workspace_root,
         agent_profiles,
         TaskKind::PullProject,
         format!("Pull {}", request.project_id),
         request.project_id,
+        ProjectTaskMode::Blocking,
+        move |project, context| pull_project(project, autostash, context),
+    )
+}
+
+pub fn pull_project_background_at(
+    workspace_root: impl AsRef<Path>,
+    agent_profiles: &[AgentProfile],
+    request: PullProjectRequest,
+) -> Result<TaskOperationResult, GitOperationError> {
+    let autostash = request.autostash;
+    run_project_git_task_with_mode(
+        workspace_root,
+        agent_profiles,
+        TaskKind::PullProject,
+        format!("Pull {}", request.project_id),
+        request.project_id,
+        ProjectTaskMode::Background,
         move |project, context| pull_project(project, autostash, context),
     )
 }
@@ -277,63 +330,88 @@ pub fn pull_all_projects_at(
     )
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+pub fn pull_all_projects_background_at(
+    workspace_root: impl AsRef<Path>,
+    agent_profiles: &[AgentProfile],
+    request: PullAllProjectsRequest,
+) -> Result<TaskOperationResult, GitOperationError> {
+    let autostash = request.autostash;
+    let safe_project_ids = request
+        .safe_project_ids
+        .map(|project_ids| project_ids.into_iter().collect::<HashSet<_>>());
+    run_all_project_git_task_with_mode(
+        workspace_root,
+        agent_profiles,
+        TaskKind::SyncAllProjects,
+        "Pull all safe projects",
+        AllProjectTaskMode::Background,
+        move |project, context| {
+            if let Some(safe_project_ids) = safe_project_ids.as_ref() {
+                if !safe_project_ids.contains(&project.id) {
+                    context.stdout(format!(
+                        "skip: {} was not marked safe by current project status",
+                        project.id
+                    ));
+                    return project_outcome(
+                        project,
+                        TaskStatus::Skipped,
+                        "not marked safe by current project status",
+                        None,
+                    );
+                }
+            }
+            pull_safe_project(project, autostash, context)
+        },
+    )
+}
+
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn check_project_updates_command(
     workspace_root: String,
     project_id: String,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let user_config = load_user_config().map_err(|error| GitOperationError {
-        kind: GitOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
-    check_project_updates_at(workspace_root, &user_config.agent_profiles, &project_id)
+    let user_config = load_user_config().map_err(GitOperationError::config)?;
+    check_project_updates_background_at(workspace_root, &user_config.agent_profiles, &project_id)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn check_all_project_updates_command(
     workspace_root: String,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let user_config = load_user_config().map_err(|error| GitOperationError {
-        kind: GitOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
-    check_all_project_updates_at(workspace_root, &user_config.agent_profiles)
+    let user_config = load_user_config().map_err(GitOperationError::config)?;
+    check_all_project_updates_background_at(workspace_root, &user_config.agent_profiles)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn pull_project_command(
     workspace_root: String,
     request: PullProjectRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let user_config = load_user_config().map_err(|error| GitOperationError {
-        kind: GitOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
-    pull_project_at(workspace_root, &user_config.agent_profiles, request)
+    let user_config = load_user_config().map_err(GitOperationError::config)?;
+    pull_project_background_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn pull_all_projects_command(
     workspace_root: String,
     request: PullAllProjectsRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let user_config = load_user_config().map_err(|error| GitOperationError {
-        kind: GitOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
-    pull_all_projects_at(workspace_root, &user_config.agent_profiles, request)
+    let user_config = load_user_config().map_err(GitOperationError::config)?;
+    pull_all_projects_background_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-fn run_project_git_task<F>(
+enum ProjectTaskMode {
+    Blocking,
+    Background,
+}
+
+fn run_project_git_task_with_mode<F>(
     workspace_root: impl AsRef<Path>,
     agent_profiles: &[AgentProfile],
     kind: TaskKind,
     summary: String,
     project_id: String,
+    mode: ProjectTaskMode,
     operation: F,
 ) -> Result<TaskOperationResult, GitOperationError>
 where
@@ -353,34 +431,38 @@ where
     let result_workspace = Arc::new(Mutex::new(None::<Workspace>));
     let result_workspace_for_task = Arc::clone(&result_workspace);
     let workspace_root_for_task = workspace_root.clone();
-    let task = run_workspace_task_blocking(
-        workspace_root.display().to_string(),
-        kind,
-        summary,
-        move |context| {
-            let result = operation(&project, context);
-            let mut workspace = scan_workspace_at(&workspace_root_for_task, &profiles);
-            if let Ok(workspace) = workspace.as_mut() {
-                if let Some(status) = result.project_status.clone() {
-                    if let Some(project) = workspace
-                        .projects
-                        .iter_mut()
-                        .find(|project| project.id == result.project_id)
-                    {
-                        project.git_status = status;
-                        project.pull_all_eligible =
-                            is_pull_all_eligible(&project.git_status, project.upstream.as_deref());
-                    }
+    let workspace_root_display = workspace_root.display().to_string();
+    let job = move |context: &mut crate::TaskContext| {
+        let result = operation(&project, context);
+        let mut workspace = scan_workspace_at(&workspace_root_for_task, &profiles);
+        if let Ok(workspace) = workspace.as_mut() {
+            if let Some(status) = result.project_status.clone() {
+                if let Some(project) = workspace
+                    .projects
+                    .iter_mut()
+                    .find(|project| project.id == result.project_id)
+                {
+                    project.git_status = status;
+                    project.pull_all_eligible =
+                        is_pull_all_eligible(&project.git_status, project.upstream.as_deref());
                 }
             }
-            if let Ok(workspace) = workspace {
-                *result_workspace_for_task
-                    .lock()
-                    .expect("git result workspace lock poisoned") = Some(workspace);
-            }
-            result.into_task_outcome()
-        },
-    );
+        }
+        if let Ok(workspace) = workspace {
+            *result_workspace_for_task
+                .lock()
+                .expect("git result workspace lock poisoned") = Some(workspace);
+        }
+        result.into_task_outcome()
+    };
+    let task = match mode {
+        ProjectTaskMode::Blocking => {
+            run_workspace_task_blocking(workspace_root_display, kind, summary, job)
+        }
+        ProjectTaskMode::Background => {
+            run_workspace_task_background(workspace_root_display, kind, summary, job)
+        }
+    };
     let workspace = result_workspace
         .lock()
         .expect("git result workspace lock poisoned")
@@ -399,6 +481,32 @@ fn run_all_project_git_task<F>(
 where
     F: Fn(&Project, &mut crate::TaskContext) -> ProjectTaskOutcome + Send + 'static,
 {
+    run_all_project_git_task_with_mode(
+        workspace_root,
+        agent_profiles,
+        kind,
+        summary,
+        AllProjectTaskMode::Blocking,
+        operation,
+    )
+}
+
+enum AllProjectTaskMode {
+    Blocking,
+    Background,
+}
+
+fn run_all_project_git_task_with_mode<F>(
+    workspace_root: impl AsRef<Path>,
+    agent_profiles: &[AgentProfile],
+    kind: TaskKind,
+    summary: impl Into<String>,
+    mode: AllProjectTaskMode,
+    operation: F,
+) -> Result<TaskOperationResult, GitOperationError>
+where
+    F: Fn(&Project, &mut crate::TaskContext) -> ProjectTaskOutcome + Send + 'static,
+{
     let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
         .map_err(GitOperationError::workspace)?;
     let workspace =
@@ -408,80 +516,78 @@ where
     let result_workspace = Arc::new(Mutex::new(None::<Workspace>));
     let result_workspace_for_task = Arc::clone(&result_workspace);
     let workspace_root_for_task = workspace_root.clone();
+    let workspace_root_display = workspace_root.display().to_string();
+    let summary = summary.into();
 
-    let task = run_workspace_task_blocking(
-        workspace_root.display().to_string(),
-        kind,
-        summary.into(),
-        move |context| {
-            let mut ok = 0usize;
-            let mut skipped = 0usize;
-            let mut failed = 0usize;
-            let mut cancelled = false;
-            let mut status_overrides = Vec::new();
-            let mut project_outcomes = Vec::new();
+    let job = move |context: &mut crate::TaskContext| {
+        let mut ok = 0usize;
+        let mut skipped = 0usize;
+        let mut failed = 0usize;
+        let mut cancelled = false;
+        let mut status_overrides = Vec::new();
+        let mut project_outcomes = Vec::new();
 
-            for project in &projects {
-                if context.is_cancelled() {
-                    context.stderr("cancelled after current substep");
+        for project in &projects {
+            if context.is_cancelled() {
+                context.stderr("cancelled after current substep");
+                cancelled = true;
+                break;
+            }
+            let result = operation(project, context);
+            if let Some(status) = result.project_status.clone() {
+                status_overrides.push((result.project_id.clone(), status));
+            }
+            project_outcomes.push(result.to_project_task_record());
+            match result.status {
+                TaskStatus::Succeeded => ok += 1,
+                TaskStatus::Skipped => skipped += 1,
+                TaskStatus::Failed => failed += 1,
+                TaskStatus::Cancelled => {
                     cancelled = true;
                     break;
                 }
-                let result = operation(project, context);
-                if let Some(status) = result.project_status.clone() {
-                    status_overrides.push((result.project_id.clone(), status));
-                }
-                project_outcomes.push(result.to_project_task_record());
-                match result.status {
-                    TaskStatus::Succeeded => ok += 1,
-                    TaskStatus::Skipped => skipped += 1,
-                    TaskStatus::Failed => failed += 1,
-                    TaskStatus::Cancelled => {
-                        cancelled = true;
-                        break;
-                    }
-                    _ => {}
-                }
+                _ => {}
             }
-            if !cancelled && context.is_cancelled() {
-                context.stderr("cancelled after current substep");
-                cancelled = true;
-            }
+        }
+        if !cancelled && context.is_cancelled() {
+            context.stderr("cancelled after current substep");
+            cancelled = true;
+        }
 
-            let mut workspace = scan_workspace_at(&workspace_root_for_task, &profiles);
-            if let Ok(workspace) = workspace.as_mut() {
-                for (project_id, status) in status_overrides {
-                    if let Some(project) = workspace
-                        .projects
-                        .iter_mut()
-                        .find(|project| project.id == project_id)
-                    {
-                        project.git_status = status;
-                        project.pull_all_eligible =
-                            is_pull_all_eligible(&project.git_status, project.upstream.as_deref());
-                    }
+        let mut workspace = scan_workspace_at(&workspace_root_for_task, &profiles);
+        if let Ok(workspace) = workspace.as_mut() {
+            for (project_id, status) in status_overrides {
+                if let Some(project) = workspace
+                    .projects
+                    .iter_mut()
+                    .find(|project| project.id == project_id)
+                {
+                    project.git_status = status;
+                    project.pull_all_eligible =
+                        is_pull_all_eligible(&project.git_status, project.upstream.as_deref());
                 }
             }
-            if let Ok(workspace) = workspace {
-                *result_workspace_for_task
-                    .lock()
-                    .expect("git result workspace lock poisoned") = Some(workspace);
-            }
-            if !cancelled && context.is_cancelled() {
-                context.stderr("cancelled after current substep");
-                cancelled = true;
-            }
+        }
+        if let Ok(workspace) = workspace {
+            *result_workspace_for_task
+                .lock()
+                .expect("git result workspace lock poisoned") = Some(workspace);
+        }
+        if !cancelled && context.is_cancelled() {
+            context.stderr("cancelled after current substep");
+            cancelled = true;
+        }
 
-            finish_all_project_task_outcome(
-                ok,
-                skipped,
-                failed,
-                cancelled,
-                project_outcomes,
-                context,
-            )
-        },
-    );
+        finish_all_project_task_outcome(ok, skipped, failed, cancelled, project_outcomes, context)
+    };
+    let task = match mode {
+        AllProjectTaskMode::Blocking => {
+            run_workspace_task_blocking(workspace_root_display, kind, summary, job)
+        }
+        AllProjectTaskMode::Background => {
+            run_workspace_task_background(workspace_root_display, kind, summary, job)
+        }
+    };
     let workspace = result_workspace
         .lock()
         .expect("git result workspace lock poisoned")
@@ -679,7 +785,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "skills_collection_app_git_ops_{name}_{}_{}",
+            "skilldock_git_ops_{name}_{}_{}",
             std::process::id(),
             unique
         ));

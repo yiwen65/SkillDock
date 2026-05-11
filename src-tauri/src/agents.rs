@@ -133,21 +133,21 @@ pub fn default_install_targets(agent_profiles: &[AgentProfile]) -> Vec<AgentProf
         .collect()
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn list_agent_profile_states_command(
     workspace_root: String,
 ) -> Result<Vec<AgentProfileState>, AgentProfileError> {
     list_agent_profile_states_at(workspace_root, default_user_config_path())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn save_agent_profiles_command(
     profiles: Vec<AgentProfile>,
 ) -> Result<UserConfig, AgentProfileError> {
     save_agent_profiles_at(default_user_config_path(), profiles)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn create_agent_profile_dir_command(
     workspace_root: String,
     profile_id: String,

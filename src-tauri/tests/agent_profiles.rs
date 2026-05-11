@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use skills_collection_app_lib::{
+use skilldock_lib::{
     create_agent_profile_dir_at, default_install_targets, list_agent_profile_states_at,
     save_agent_profiles_at, AgentProfile, AgentProfileErrorKind, LinkMode, UserConfig,
 };
@@ -12,7 +12,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "skills_collection_app_{name}_{}_{}",
+        "skilldock_{name}_{}_{}",
         std::process::id(),
         unique
     ));
@@ -217,7 +217,7 @@ fn rejects_invalid_profile_sets_without_overwriting_config() {
     );
 
     let loaded = UserConfig::default();
-    let persisted = skills_collection_app_lib::load_user_config_at(&config_path).unwrap();
+    let persisted = skilldock_lib::load_user_config_at(&config_path).unwrap();
     assert_eq!(persisted.agent_profiles[0].id, "valid-agent");
     assert_ne!(persisted.agent_profiles, loaded.agent_profiles);
 }

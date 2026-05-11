@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use skills_collection_app_lib::{
+use skilldock_lib::{
     link_skill_at, preview_link_skill_at, preview_link_skills_batch_at, preview_unlink_skill_at,
     preview_unlink_skills_batch_at, unlink_skill_at, unlink_skills_batch_at, AgentProfile,
     BatchLinkExecuteRequest, BatchLinkPreviewRequest, BatchUnlinkExecuteRequest,
@@ -16,7 +16,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "skills_collection_app_{name}_{}_{}",
+        "skilldock_{name}_{}_{}",
         std::process::id(),
         unique
     ));
@@ -441,7 +441,7 @@ fn batch_preview_and_execute_links_safe_items_and_skips_conflicts() {
     assert_eq!(preview.previews[1].status, LinkPreviewStatus::WillLink);
     assert_eq!(preview.previews[2].status, LinkPreviewStatus::NameConflict);
 
-    let result = skills_collection_app_lib::link_skills_batch_at(
+    let result = skilldock_lib::link_skills_batch_at(
         &workspace_root,
         &profiles,
         BatchLinkExecuteRequest {
@@ -498,7 +498,7 @@ fn batch_execute_revalidates_each_preview_and_continues_after_stale_item() {
 
     std::fs::write(profile_dir.join("stale"), "arrived after preview").unwrap();
 
-    let result = skills_collection_app_lib::link_skills_batch_at(
+    let result = skilldock_lib::link_skills_batch_at(
         &workspace_root,
         &profiles,
         BatchLinkExecuteRequest {

@@ -1,11 +1,11 @@
 [package]
-name = "skills-collection-app"
+name = "skilldock"
 version = "0.1.0"
-description = "Desktop manager for a local skills collection workspace"
+description = "Desktop manager for a local SkillDock workspace"
 edition = "2021"
 
 [lib]
-name = "skills_collection_app_lib"
+name = "skilldock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]

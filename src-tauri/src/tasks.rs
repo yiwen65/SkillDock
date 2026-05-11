@@ -4,10 +4,33 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{ProjectTaskRecord, TaskKind, TaskRecord, TaskStatus};
 
+#[cfg(feature = "desktop")]
+use tauri::{AppHandle, Emitter};
+
+#[cfg(feature = "desktop")]
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+#[cfg(feature = "desktop")]
+pub fn set_app_handle(handle: AppHandle) {
+    let _ = APP_HANDLE.set(handle);
+}
+
+#[cfg(feature = "desktop")]
+fn emit_task_update(record: &TaskRecord) {
+    if let Some(handle) = APP_HANDLE.get() {
+        let _ = handle.emit("task-update", record);
+    }
+}
+
 type TaskJob = Box<dyn FnOnce(&mut TaskContext) -> TaskOutcome + Send + 'static>;
 
 pub const TASK_LOG_MAX_BYTES: usize = 64 * 1024;
 pub const TASK_RECORD_MAX_RETAINED: usize = 100;
+/// Default number of recent records returned when `limit` is not supplied.
+/// Kept in sync with `TASKS_RECENT_LIMIT` in `src/App.tsx`.
+pub const TASK_RECENT_DEFAULT_LIMIT: usize = 80;
+/// Upper bound applied to caller-supplied limits to cap IPC payload size.
+pub const TASK_RECENT_MAX_LIMIT: usize = 200;
 const TASK_LOG_TRUNCATED_MARKER: &str = "[task log truncated; showing most recent output]\n";
 
 struct QueuedTask {
@@ -71,48 +94,31 @@ pub struct TaskOutcome {
 }
 
 impl TaskOutcome {
-    pub fn succeeded(summary: impl Into<String>) -> Self {
+    fn new(status: TaskStatus, summary: impl Into<String>, error: Option<String>) -> Self {
         Self {
-            status: TaskStatus::Succeeded,
+            status,
             summary: summary.into(),
-            error: None,
+            error,
             stdout: String::new(),
             stderr: String::new(),
             project_outcomes: Vec::new(),
         }
+    }
+
+    pub fn succeeded(summary: impl Into<String>) -> Self {
+        Self::new(TaskStatus::Succeeded, summary, None)
     }
 
     pub fn skipped(summary: impl Into<String>) -> Self {
-        Self {
-            status: TaskStatus::Skipped,
-            summary: summary.into(),
-            error: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            project_outcomes: Vec::new(),
-        }
+        Self::new(TaskStatus::Skipped, summary, None)
     }
 
     pub fn failed(summary: impl Into<String>, error: impl Into<String>) -> Self {
-        Self {
-            status: TaskStatus::Failed,
-            summary: summary.into(),
-            error: Some(error.into()),
-            stdout: String::new(),
-            stderr: String::new(),
-            project_outcomes: Vec::new(),
-        }
+        Self::new(TaskStatus::Failed, summary, Some(error.into()))
     }
 
     pub fn cancelled(summary: impl Into<String>) -> Self {
-        Self {
-            status: TaskStatus::Cancelled,
-            summary: summary.into(),
-            error: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            project_outcomes: Vec::new(),
-        }
+        Self::new(TaskStatus::Cancelled, summary, None)
     }
 
     pub fn with_stdout(mut self, stdout: impl Into<String>) -> Self {
@@ -327,6 +333,8 @@ impl TaskQueue {
         record.project_outcomes = outcome.project_outcomes;
         let record = record.clone();
         prune_completed_records(&mut state);
+        #[cfg(feature = "desktop")]
+        emit_task_update(&record);
         record
     }
 }
@@ -338,6 +346,16 @@ fn status_only_record(record: &TaskRecord) -> TaskRecord {
     status
 }
 
+/// Drop the oldest terminal-status records beyond `TASK_RECORD_MAX_RETAINED`
+/// and purge cancel flags for records that are no longer cancellable.
+///
+/// Invariants:
+/// - Records that are still queued or running are never removed here.
+/// - `records` is insertion-ordered (new tasks are pushed to the back), so
+///   `retain` walks from oldest to newest and removes the oldest terminal
+///   records first.
+/// - A record that gets pruned cannot be cancelled afterwards, which is fine
+///   because only terminal records are eligible for pruning.
 fn prune_completed_records(state: &mut TaskQueueState) {
     let queued_ids: std::collections::HashSet<String> =
         state.queued.iter().map(|task| task.id.clone()).collect();
@@ -452,6 +470,26 @@ where
     run_queued_task_blocking(&queued.id)
 }
 
+pub fn run_workspace_task_background<F>(
+    workspace_root: impl Into<String>,
+    kind: TaskKind,
+    summary: impl Into<String>,
+    job: F,
+) -> TaskRecord
+where
+    F: FnOnce(&mut TaskContext) -> TaskOutcome + Send + 'static,
+{
+    let queued = task_queue().enqueue_for_workspace(kind, workspace_root, summary, job);
+    let task_id = queued.id.clone();
+    std::thread::Builder::new()
+        .name(format!("task-runner-{task_id}"))
+        .spawn(move || {
+            run_queued_task_blocking(&task_id);
+        })
+        .expect("failed to spawn background task runner");
+    queued
+}
+
 fn run_queued_task_blocking(task_id: &str) -> TaskRecord {
     task_queue()
         .run_until_complete(task_id)
@@ -476,8 +514,16 @@ pub fn recent_task_records_command(
     workspace_root: Option<String>,
     limit: Option<usize>,
 ) -> Vec<TaskRecord> {
-    task_queue()
-        .recent_records_for_workspace(workspace_root.as_deref(), limit.unwrap_or(40).min(200))
+    // Limit is clamped to `TASK_RECENT_MAX_LIMIT` so that a malicious or
+    // buggy caller cannot pull an unbounded slice of history across the IPC
+    // boundary. `workspace_root` filtering assumes both sides use the canonical
+    // path produced by `validate_workspace_root` in workspace.rs.
+    task_queue().recent_records_for_workspace(
+        workspace_root.as_deref(),
+        limit
+            .unwrap_or(TASK_RECENT_DEFAULT_LIMIT)
+            .min(TASK_RECENT_MAX_LIMIT),
+    )
 }
 
 #[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]

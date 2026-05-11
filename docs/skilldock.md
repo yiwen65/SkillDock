@@ -1,4 +1,4 @@
-# Skills Collection App 设计文档
+# SkillDock 设计文档
 
 ## 背景
 
@@ -61,7 +61,7 @@ app/
   src/
   src-tauri/
 docs/
-  skills-collection-app.md
+  skilldock.md
 scripts/
   link-skill.sh
   list-skills.sh
@@ -101,7 +101,7 @@ workspace 是 source of truth：
 Workspace config：
 
 ```text
-<workspace>/.skills-collection/config.json
+<workspace>/.skilldock/config.json
 ```
 
 存储与 collection 相关、可迁移的 metadata：
@@ -652,5 +652,5 @@ MVP 不做：
 
 ## 实施追踪
 
-- 实施计划：[docs/skills-collection-app-implementation-plan.md](skills-collection-app-implementation-plan.md)
-- 任务拆分：[docs/skills-collection-app-tasks.md](skills-collection-app-tasks.md)
+- 实施计划：[docs/skilldock-implementation-plan.md](skilldock-implementation-plan.md)
+- 任务拆分：[docs/skilldock-tasks.md](skilldock-tasks.md)

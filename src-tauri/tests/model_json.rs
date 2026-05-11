@@ -1,4 +1,4 @@
-use skills_collection_app_lib::{
+use skilldock_lib::{
     GitStatus, InstalledAgentSkill, InstalledAgentSkillStatus, ProjectCategory, ProjectTaskRecord,
     Skill, TaskKind, TaskRecord, TaskStatus,
 };

@@ -264,24 +264,6 @@ export type AutomaticCheckSettings = {
   pullAfterCheck: boolean;
 };
 
-export type ConfigError = {
-  kind: ConfigErrorKind;
-  path: string;
-  message: string;
-};
-
-export type AgentProfileError = {
-  kind: AgentProfileErrorKind;
-  path?: string;
-  message: string;
-};
-
-export type LinkOperationError = {
-  kind: LinkOperationErrorKind;
-  path?: string;
-  message: string;
-};
-
 export type GitProvider = "github" | "gitlab" | "unknown";
 
 export type GitStatus =
@@ -307,23 +289,6 @@ export type LinkMode = "symlink";
 export type ThemePreference = "system" | "light" | "dark";
 
 export type ProjectSort = "name" | "updated" | "skill_count";
-
-export type ConfigErrorKind = "io" | "invalid_json" | "serialize" | "unsupported_version";
-
-export type AgentProfileErrorKind =
-  | "validation"
-  | "confirmation_required"
-  | "profile_not_found"
-  | "config"
-  | "workspace"
-  | "io";
-
-export type LinkOperationErrorKind =
-  | "validation"
-  | "blocked"
-  | "stale_preview"
-  | "workspace"
-  | "io";
 
 export type InstalledAgentSkillStatus = "valid" | "broken" | "external" | "conflict";
 

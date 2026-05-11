@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -6,13 +6,13 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    load_user_config, run_workspace_task_blocking, scan_workspace_at, AgentProfile,
-    BatchLinkExecuteRequest, BatchLinkOperationResult, BatchLinkPreview, BatchLinkPreviewRequest,
-    BatchLinkSummary, BatchUnlinkExecuteRequest, BatchUnlinkOperationResult, BatchUnlinkPreview,
-    BatchUnlinkPreviewRequest, BatchUnlinkSummary, ExecuteLinkSkillRequest,
-    ExecuteUnlinkSkillRequest, LinkPreview, LinkPreviewStatus, LinkSkillRequest, Skill, TaskKind,
-    TaskOperationResult, TaskOutcome, UnlinkPreview, UnlinkPreviewStatus, UnlinkSkillRequest,
-    Workspace, WorkspaceError,
+    expand_home, is_writable_dir, load_user_config, run_workspace_task_blocking, scan_workspace_at,
+    AgentProfile, BatchLinkExecuteRequest, BatchLinkOperationResult, BatchLinkPreview,
+    BatchLinkPreviewRequest, BatchLinkSummary, BatchUnlinkExecuteRequest,
+    BatchUnlinkOperationResult, BatchUnlinkPreview, BatchUnlinkPreviewRequest, BatchUnlinkSummary,
+    ConfigError, ExecuteLinkSkillRequest, ExecuteUnlinkSkillRequest, LinkPreview,
+    LinkPreviewStatus, LinkSkillRequest, Skill, TaskKind, TaskOperationResult, TaskOutcome,
+    UnlinkPreview, UnlinkPreviewStatus, UnlinkSkillRequest, Workspace, WorkspaceError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +70,14 @@ impl LinkOperationError {
         }
     }
 
+    fn config(error: ConfigError) -> Self {
+        Self {
+            kind: LinkOperationErrorKind::Io,
+            path: Some(error.path),
+            message: error.message,
+        }
+    }
+
     fn io(path: &Path, error: std::io::Error) -> Self {
         Self {
             kind: LinkOperationErrorKind::Io,
@@ -98,6 +106,14 @@ pub fn preview_link_skill_at(
         .map_err(LinkOperationError::workspace)?;
     let workspace = scan_workspace_at(&workspace_root, agent_profiles)
         .map_err(LinkOperationError::workspace)?;
+    preview_link_with_workspace(&workspace_root, &workspace, request)
+}
+
+fn preview_link_with_workspace(
+    workspace_root: &Path,
+    workspace: &Workspace,
+    request: LinkSkillRequest,
+) -> Result<LinkPreview, LinkOperationError> {
     let profile_state = workspace
         .agent_profiles
         .iter()
@@ -161,12 +177,11 @@ pub fn link_skill_at(
 ) -> Result<TaskOperationResult, LinkOperationError> {
     let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
         .map_err(LinkOperationError::workspace)?;
-    let preview_request = LinkSkillRequest {
-        skill_id: request.preview.skill_id.clone(),
-        agent_profile_id: request.preview.agent_profile_id.clone(),
-        link_name: Some(request.preview.link_name.clone()),
-    };
-    let current_preview = preview_link_skill_at(&workspace_root, agent_profiles, preview_request)?;
+    let profile = agent_profiles
+        .iter()
+        .find(|profile| profile.id == request.preview.agent_profile_id)
+        .ok_or_else(|| LinkOperationError::validation("Agent profile was not found."))?;
+    let current_preview = refresh_link_preview(&request.preview, profile)?;
     if current_preview != request.preview {
         return Err(LinkOperationError::stale_preview());
     }
@@ -222,14 +237,7 @@ pub fn link_skill_at(
         .lock()
         .expect("link result workspace lock poisoned")
         .clone()
-        .unwrap_or_else(|| {
-            scan_workspace_at(&workspace_root, agent_profiles).unwrap_or_else(|_| Workspace {
-                root: workspace_root.display().to_string(),
-                projects: Vec::new(),
-                skills: Vec::new(),
-                agent_profiles: Vec::new(),
-            })
-        });
+        .unwrap_or_else(|| scan_or_empty_workspace(&workspace_root, agent_profiles));
 
     Ok(TaskOperationResult { task, workspace })
 }
@@ -241,13 +249,11 @@ pub fn preview_link_skills_batch_at(
 ) -> Result<BatchLinkPreview, LinkOperationError> {
     let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
         .map_err(LinkOperationError::workspace)?;
+    let workspace = scan_workspace_at(&workspace_root, agent_profiles)
+        .map_err(LinkOperationError::workspace)?;
     let mut previews = Vec::with_capacity(request.items.len());
     for item in request.items {
-        previews.push(preview_link_skill_at(
-            &workspace_root,
-            agent_profiles,
-            item,
-        )?);
+        previews.push(preview_link_with_workspace(&workspace_root, &workspace, item)?);
     }
     Ok(BatchLinkPreview { previews })
 }
@@ -275,28 +281,38 @@ pub fn link_skills_batch_at(
         move |context| {
             let mut summary = BatchLinkSummary::default();
 
-            for preview in &previews_for_task {
-                let current_preview = preview_link_skill_at(
-                    &workspace_root_for_task,
-                    &profiles,
-                    LinkSkillRequest {
-                        skill_id: preview.skill_id.clone(),
-                        agent_profile_id: preview.agent_profile_id.clone(),
-                        link_name: Some(preview.link_name.clone()),
-                    },
-                );
+            let profiles_by_id: HashMap<&str, &AgentProfile> =
+                profiles.iter().map(|profile| (profile.id.as_str(), profile)).collect();
+            let mut profile_accessibility_cache: HashMap<String, AgentDirAccessibility> =
+                HashMap::new();
 
-                let current_preview = match current_preview {
-                    Ok(current_preview) => current_preview,
-                    Err(error) => {
-                        summary.failed += 1;
-                        context.stderr(format!(
-                            "failed: {} -> {} ({})",
-                            preview.skill_id, preview.agent_profile_id, error.message
-                        ));
-                        continue;
-                    }
+            for preview in &previews_for_task {
+                let Some(profile) = profiles_by_id.get(preview.agent_profile_id.as_str()) else {
+                    summary.failed += 1;
+                    context.stderr(format!(
+                        "failed: {} -> {} (agent profile not found)",
+                        preview.skill_id, preview.agent_profile_id
+                    ));
+                    continue;
                 };
+
+                let accessibility = profile_accessibility_cache
+                    .entry(profile.id.clone())
+                    .or_insert_with(|| probe_agent_dir_accessibility(profile))
+                    .clone();
+
+                let current_preview =
+                    match refresh_link_preview_with_accessibility(preview, &accessibility) {
+                        Ok(current_preview) => current_preview,
+                        Err(error) => {
+                            summary.failed += 1;
+                            context.stderr(format!(
+                                "failed: {} -> {} ({})",
+                                preview.skill_id, preview.agent_profile_id, error.message
+                            ));
+                            continue;
+                        }
+                    };
 
                 if current_preview != *preview {
                     summary.failed += 1;
@@ -376,14 +392,7 @@ pub fn link_skills_batch_at(
         .lock()
         .expect("batch link result workspace lock poisoned")
         .clone()
-        .unwrap_or_else(|| {
-            scan_workspace_at(&workspace_root, agent_profiles).unwrap_or_else(|_| Workspace {
-                root: workspace_root.display().to_string(),
-                projects: Vec::new(),
-                skills: Vec::new(),
-                agent_profiles: Vec::new(),
-            })
-        });
+        .unwrap_or_else(|| scan_or_empty_workspace(&workspace_root, agent_profiles));
     let summary = result_summary
         .lock()
         .expect("batch link result summary lock poisoned")
@@ -406,6 +415,14 @@ pub fn preview_unlink_skill_at(
         .map_err(LinkOperationError::workspace)?;
     let workspace = scan_workspace_at(&workspace_root, agent_profiles)
         .map_err(LinkOperationError::workspace)?;
+    preview_unlink_with_workspace(&workspace_root, &workspace, request)
+}
+
+fn preview_unlink_with_workspace(
+    workspace_root: &Path,
+    workspace: &Workspace,
+    request: UnlinkSkillRequest,
+) -> Result<UnlinkPreview, LinkOperationError> {
     let profile_state = workspace
         .agent_profiles
         .iter()
@@ -442,12 +459,12 @@ pub fn unlink_skill_at(
 ) -> Result<TaskOperationResult, LinkOperationError> {
     let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
         .map_err(LinkOperationError::workspace)?;
-    let preview_request = UnlinkSkillRequest {
-        agent_profile_id: request.preview.agent_profile_id.clone(),
-        link_name: request.preview.link_name.clone(),
-    };
+    let profile = agent_profiles
+        .iter()
+        .find(|profile| profile.id == request.preview.agent_profile_id)
+        .ok_or_else(|| LinkOperationError::validation("Agent profile was not found."))?;
     let current_preview =
-        preview_unlink_skill_at(&workspace_root, agent_profiles, preview_request)?;
+        refresh_unlink_preview(&workspace_root, &request.preview, profile)?;
     if current_preview != request.preview {
         return Err(LinkOperationError::stale_preview());
     }
@@ -496,14 +513,7 @@ pub fn unlink_skill_at(
         .lock()
         .expect("unlink result workspace lock poisoned")
         .clone()
-        .unwrap_or_else(|| {
-            scan_workspace_at(&workspace_root, agent_profiles).unwrap_or_else(|_| Workspace {
-                root: workspace_root.display().to_string(),
-                projects: Vec::new(),
-                skills: Vec::new(),
-                agent_profiles: Vec::new(),
-            })
-        });
+        .unwrap_or_else(|| scan_or_empty_workspace(&workspace_root, agent_profiles));
 
     Ok(TaskOperationResult { task, workspace })
 }
@@ -515,13 +525,11 @@ pub fn preview_unlink_skills_batch_at(
 ) -> Result<BatchUnlinkPreview, LinkOperationError> {
     let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
         .map_err(LinkOperationError::workspace)?;
+    let workspace = scan_workspace_at(&workspace_root, agent_profiles)
+        .map_err(LinkOperationError::workspace)?;
     let mut previews = Vec::with_capacity(request.items.len());
     for item in request.items {
-        previews.push(preview_unlink_skill_at(
-            &workspace_root,
-            agent_profiles,
-            item,
-        )?);
+        previews.push(preview_unlink_with_workspace(&workspace_root, &workspace, item)?);
     }
     Ok(BatchUnlinkPreview { previews })
 }
@@ -549,17 +557,31 @@ pub fn unlink_skills_batch_at(
         move |context| {
             let mut summary = BatchUnlinkSummary::default();
 
-            for preview in &previews_for_task {
-                let current_preview = preview_unlink_skill_at(
-                    &workspace_root_for_task,
-                    &profiles,
-                    UnlinkSkillRequest {
-                        agent_profile_id: preview.agent_profile_id.clone(),
-                        link_name: preview.link_name.clone(),
-                    },
-                );
+            let profiles_by_id: HashMap<&str, &AgentProfile> =
+                profiles.iter().map(|profile| (profile.id.as_str(), profile)).collect();
+            let mut profile_accessibility_cache: HashMap<String, AgentDirAccessibility> =
+                HashMap::new();
 
-                let current_preview = match current_preview {
+            for preview in &previews_for_task {
+                let Some(profile) = profiles_by_id.get(preview.agent_profile_id.as_str()) else {
+                    summary.failed += 1;
+                    context.stderr(format!(
+                        "failed: {} / {} (agent profile not found)",
+                        preview.agent_profile_id, preview.link_name
+                    ));
+                    continue;
+                };
+
+                let accessibility = profile_accessibility_cache
+                    .entry(profile.id.clone())
+                    .or_insert_with(|| probe_agent_dir_accessibility(profile))
+                    .clone();
+
+                let current_preview = match refresh_unlink_preview_with_accessibility(
+                    &workspace_root_for_task,
+                    preview,
+                    &accessibility,
+                ) {
                     Ok(current_preview) => current_preview,
                     Err(error) => {
                         summary.failed += 1;
@@ -645,14 +667,7 @@ pub fn unlink_skills_batch_at(
         .lock()
         .expect("batch unlink result workspace lock poisoned")
         .clone()
-        .unwrap_or_else(|| {
-            scan_workspace_at(&workspace_root, agent_profiles).unwrap_or_else(|_| Workspace {
-                root: workspace_root.display().to_string(),
-                projects: Vec::new(),
-                skills: Vec::new(),
-                agent_profiles: Vec::new(),
-            })
-        });
+        .unwrap_or_else(|| scan_or_empty_workspace(&workspace_root, agent_profiles));
     let summary = result_summary
         .lock()
         .expect("batch unlink result summary lock poisoned")
@@ -666,108 +681,211 @@ pub fn unlink_skills_batch_at(
     })
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn preview_link_skill_command(
     workspace_root: String,
     request: LinkSkillRequest,
 ) -> Result<LinkPreview, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     preview_link_skill_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn link_skill_command(
     workspace_root: String,
     request: ExecuteLinkSkillRequest,
 ) -> Result<TaskOperationResult, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     link_skill_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn preview_link_skills_batch_command(
     workspace_root: String,
     request: BatchLinkPreviewRequest,
 ) -> Result<BatchLinkPreview, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     preview_link_skills_batch_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn link_skills_batch_command(
     workspace_root: String,
     request: BatchLinkExecuteRequest,
 ) -> Result<BatchLinkOperationResult, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     link_skills_batch_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn preview_unlink_skill_command(
     workspace_root: String,
     request: UnlinkSkillRequest,
 ) -> Result<UnlinkPreview, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     preview_unlink_skill_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn unlink_skill_command(
     workspace_root: String,
     request: ExecuteUnlinkSkillRequest,
 ) -> Result<TaskOperationResult, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     unlink_skill_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn preview_unlink_skills_batch_command(
     workspace_root: String,
     request: BatchUnlinkPreviewRequest,
 ) -> Result<BatchUnlinkPreview, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     preview_unlink_skills_batch_at(workspace_root, &user_config.agent_profiles, request)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn unlink_skills_batch_command(
     workspace_root: String,
     request: BatchUnlinkExecuteRequest,
 ) -> Result<BatchUnlinkOperationResult, LinkOperationError> {
-    let user_config = load_user_config().map_err(|error| LinkOperationError {
-        kind: LinkOperationErrorKind::Io,
-        path: Some(error.path),
-        message: error.message,
-    })?;
+    let user_config = load_user_config().map_err(LinkOperationError::config)?;
     unlink_skills_batch_at(workspace_root, &user_config.agent_profiles, request)
+}
+
+/// Cached accessibility info for an agent profile's skills directory.
+/// Used to avoid repeating the (relatively cheap but non-trivial) write probe
+/// for every preview in a batch operation.
+#[derive(Debug, Clone)]
+struct AgentDirAccessibility {
+    exists: bool,
+    writable: bool,
+}
+
+fn probe_agent_dir_accessibility(profile: &AgentProfile) -> AgentDirAccessibility {
+    let skills_dir = expand_home(&profile.skills_dir);
+    let exists = skills_dir.is_dir();
+    let writable = exists && is_writable_dir(&skills_dir);
+    AgentDirAccessibility { exists, writable }
+}
+
+/// Scan the workspace and return the result, or fall back to an empty
+/// `Workspace` anchored at `workspace_root` on failure. Used after link/unlink
+/// operations to return a post-operation workspace snapshot without making
+/// scan failure a fatal error on an otherwise-successful task.
+fn scan_or_empty_workspace(workspace_root: &Path, agent_profiles: &[AgentProfile]) -> Workspace {
+    scan_workspace_at(workspace_root, agent_profiles).unwrap_or_else(|_| Workspace {
+        root: workspace_root.display().to_string(),
+        projects: Vec::new(),
+        skills: Vec::new(),
+        agent_profiles: Vec::new(),
+    })
+}
+
+/// Re-derive the current status of a link preview by inspecting the filesystem
+/// paths already recorded in the preview. This is a direct replacement for
+/// `preview_link_with_workspace` when the caller already has a previously
+/// computed preview; it avoids a full workspace rescan.
+///
+/// The returned preview preserves `skill_id`, `agent_profile_id`, `link_name`,
+/// `source_path`, and `target_path` from the input preview, so field-by-field
+/// comparison against the caller-supplied preview still detects staleness
+/// exactly as the original workspace-scan based flow did (including message
+/// differences for conflict cases).
+fn refresh_link_preview(
+    preview: &LinkPreview,
+    profile: &AgentProfile,
+) -> Result<LinkPreview, LinkOperationError> {
+    let accessibility = probe_agent_dir_accessibility(profile);
+    refresh_link_preview_with_accessibility(preview, &accessibility)
+}
+
+fn refresh_link_preview_with_accessibility(
+    preview: &LinkPreview,
+    accessibility: &AgentDirAccessibility,
+) -> Result<LinkPreview, LinkOperationError> {
+    let source_path = PathBuf::from(&preview.source_path);
+    let target_path = PathBuf::from(&preview.target_path);
+
+    let (status, message) = if !accessibility.exists {
+        (
+            LinkPreviewStatus::AgentPathMissing,
+            Some("Agent profile skills directory is missing.".to_string()),
+        )
+    } else if !accessibility.writable {
+        (
+            LinkPreviewStatus::AgentPathNotWritable,
+            Some("Agent profile skills directory is not writable.".to_string()),
+        )
+    } else if !source_path.exists() {
+        (
+            LinkPreviewStatus::MissingSource,
+            Some("Skill source directory is missing.".to_string()),
+        )
+    } else {
+        classify_target(&target_path, &source_path)?
+    };
+
+    Ok(LinkPreview {
+        status,
+        message,
+        ..preview.clone()
+    })
+}
+
+/// Re-derive the current status of an unlink preview without a full workspace
+/// scan. Unlike link previews, unlink classification needs to know whether
+/// the symlink target is a known workspace skill. Instead of rescanning every
+/// skill, we verify the target still resolves to the `source_path` recorded
+/// in the original preview — this is sufficient to detect the stale cases that
+/// matter (target changed, symlink removed, file/dir replaced a symlink, etc.).
+fn refresh_unlink_preview(
+    workspace_root: &Path,
+    preview: &UnlinkPreview,
+    profile: &AgentProfile,
+) -> Result<UnlinkPreview, LinkOperationError> {
+    let accessibility = probe_agent_dir_accessibility(profile);
+    refresh_unlink_preview_with_accessibility(workspace_root, preview, &accessibility)
+}
+
+fn refresh_unlink_preview_with_accessibility(
+    workspace_root: &Path,
+    preview: &UnlinkPreview,
+    accessibility: &AgentDirAccessibility,
+) -> Result<UnlinkPreview, LinkOperationError> {
+    let target_path = PathBuf::from(&preview.target_path);
+
+    if !accessibility.exists {
+        return Ok(UnlinkPreview {
+            source_path: None,
+            status: UnlinkPreviewStatus::AgentPathMissing,
+            message: Some("Agent profile skills directory is missing.".to_string()),
+            ..preview.clone()
+        });
+    }
+
+    // Rebuild a single-entry skill_paths set from the recorded preview source,
+    // so classify_unlink_target can report `WillUnlink` when the symlink still
+    // matches that path. We only seed this for previews that were originally
+    // `WillUnlink`; for `ExternalSymlink` or `NotWorkspaceSkill` the source
+    // path is outside the workspace skill set, and seeding it would
+    // incorrectly reclassify the current target as a workspace skill.
+    let mut skill_paths = HashSet::new();
+    if preview.status == UnlinkPreviewStatus::WillUnlink {
+        if let Some(original_source) = preview.source_path.as_deref() {
+            skill_paths.insert(PathBuf::from(original_source));
+        }
+    }
+
+    let (status, source_path, message) =
+        classify_unlink_target(workspace_root, &target_path, &skill_paths)?;
+
+    Ok(UnlinkPreview {
+        source_path: source_path.map(|path| path.display().to_string()),
+        status,
+        message,
+        ..preview.clone()
+    })
 }
 
 fn canonical_workspace_skill_path(

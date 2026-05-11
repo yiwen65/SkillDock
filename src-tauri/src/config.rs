@@ -9,7 +9,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use crate::{AgentProfile, LinkMode, ProjectCategory};
 
 const CONFIG_SCHEMA_VERSION: u32 = 1;
-const WORKSPACE_CONFIG_DIR: &str = ".skills-collection";
+const WORKSPACE_CONFIG_DIR: &str = ".skilldock";
 const WORKSPACE_CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,8 +127,8 @@ pub struct WindowSize {
 impl Default for WindowSize {
     fn default() -> Self {
         Self {
-            width: 1200,
-            height: 800,
+            width: 1440,
+            height: 900,
         }
     }
 }
@@ -314,7 +314,7 @@ pub fn default_user_config_path() -> PathBuf {
             return PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
-                .join("Skills Collection")
+                .join("SkillDock")
                 .join("config.json");
         }
     }
@@ -323,19 +323,19 @@ pub fn default_user_config_path() -> PathBuf {
     {
         if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
             return PathBuf::from(config_home)
-                .join("skills-collection")
+                .join("skilldock")
                 .join("config.json");
         }
 
         if let Some(home) = std::env::var_os("HOME") {
             return PathBuf::from(home)
                 .join(".config")
-                .join("skills-collection")
+                .join("skilldock")
                 .join("config.json");
         }
     }
 
-    PathBuf::from("skills-collection-config.json")
+    PathBuf::from("skilldock-config.json")
 }
 
 fn load_config_or_default<T>(path: &Path) -> Result<T, ConfigError>

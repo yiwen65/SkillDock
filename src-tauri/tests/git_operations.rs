@@ -2,10 +2,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use skills_collection_app_lib::{
-    check_all_project_updates_at, check_project_updates_at, import_project_at, plan_import_project,
-    pull_all_projects_at, pull_project_at, AgentProfile, GitOperationErrorKind, GitStatus,
-    ImportProjectRequest, PullAllProjectsRequest, PullProjectRequest, TaskStatus,
+use skilldock_lib::{
+    check_all_project_updates_at, check_all_project_updates_background_at,
+    check_project_updates_at, check_project_updates_background_at, import_project_at,
+    plan_import_project, pull_all_projects_at, pull_project_at, pull_project_background_at,
+    task_queue, AgentProfile, GitOperationErrorKind, GitStatus, ImportProjectRequest,
+    PullAllProjectsRequest, PullProjectRequest, TaskStatus,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -14,7 +16,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "skills_collection_app_git_{name}_{}_{}",
+        "skilldock_git_{name}_{}_{}",
         std::process::id(),
         unique
     ));
@@ -297,6 +299,40 @@ fn check_all_project_updates_summarizes_success_skips_and_failures() {
 }
 
 #[test]
+fn check_all_project_updates_background_returns_before_running_to_completion() {
+    let workspace = temp_dir("check_all_updates_background");
+    let (remote, _seed) = init_bare_remote_with_seed("check_all_updates_background");
+    clone_project(&remote, &workspace, "project-one");
+
+    let result = check_all_project_updates_background_at(&workspace, &[]).unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Queued);
+    assert_eq!(result.workspace.projects.len(), 1);
+
+    let finished = task_queue().run_until_complete(&result.task.id).unwrap();
+    assert_eq!(finished.status, TaskStatus::Succeeded);
+    let logs = task_queue().get_task_logs(&result.task.id).unwrap();
+    assert!(logs.stdout.contains("summary: ok=1 skipped=0 failed=0"));
+}
+
+#[test]
+fn check_project_updates_background_returns_before_running_to_completion() {
+    let workspace = temp_dir("check_project_updates_background");
+    let (remote, _seed) = init_bare_remote_with_seed("check_project_updates_background");
+    clone_project(&remote, &workspace, "project-one");
+
+    let result = check_project_updates_background_at(&workspace, &[], "project-one").unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Queued);
+    assert_eq!(result.workspace.projects.len(), 1);
+
+    let finished = task_queue().run_until_complete(&result.task.id).unwrap();
+    assert_eq!(finished.status, TaskStatus::Succeeded);
+    let logs = task_queue().get_task_logs(&result.task.id).unwrap();
+    assert!(logs.stdout.contains("fetch --prune"));
+}
+
+#[test]
 fn pull_project_skips_dirty_worktree_by_default() {
     let workspace = temp_dir("pull_dirty");
     let (remote, _seed) = init_bare_remote_with_seed("pull_dirty");
@@ -345,6 +381,32 @@ fn pull_project_uses_fast_forward_prune_and_refreshes_workspace() {
         .find(|project| project.id == "project-one")
         .unwrap();
     assert_eq!(scanned.git_status, GitStatus::UpToDate);
+}
+
+#[test]
+fn pull_project_background_returns_before_running_to_completion() {
+    let workspace = temp_dir("pull_background");
+    let (remote, seed) = init_bare_remote_with_seed("pull_background");
+    let project = clone_project(&remote, &workspace, "project-one");
+    commit_and_push(&seed, "CHANGELOG.md", "new release\n");
+
+    let result = pull_project_background_at(
+        &workspace,
+        &[],
+        PullProjectRequest {
+            project_id: "project-one".to_string(),
+            autostash: false,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Queued);
+
+    let finished = task_queue().run_until_complete(&result.task.id).unwrap();
+    assert_eq!(finished.status, TaskStatus::Succeeded);
+    assert!(project.join("CHANGELOG.md").exists());
+    let logs = task_queue().get_task_logs(&result.task.id).unwrap();
+    assert!(logs.stdout.contains("pull --ff-only --prune"));
 }
 
 #[test]

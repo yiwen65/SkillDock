@@ -23,12 +23,12 @@ const server = await createServer({
 const noop = () => {};
 
 const workspace = {
-  root: "/tmp/skills-collection-smoke",
+  root: "/tmp/skilldock-smoke",
   projects: [
     {
       id: "project-one",
       name: "Project One",
-      path: "/tmp/skills-collection-smoke/project-one",
+      path: "/tmp/skilldock-smoke/project-one",
       remoteUrl: "https://example.com/project-one.git",
       provider: "unknown",
       branch: "main",
@@ -54,12 +54,27 @@ const workspace = {
       description: "Drive implementation through tests.",
       sourceProjectId: "project-one",
       relativePath: "project-one/skills/tdd",
-      absolutePath: "/tmp/skills-collection-smoke/project-one/skills/tdd",
+      absolutePath: "/tmp/skilldock-smoke/project-one/skills/tdd",
       defaultLinkName: "project-one-tdd",
       hasAssets: false,
       hasScripts: false,
       hasReferences: true,
-      installedAgents: [],
+      installedAgents: [
+        {
+          agentProfileId: "codex",
+          linkName: "project-one-tdd",
+          sourcePath: "/tmp/skilldock-smoke/project-one/skills/tdd",
+          targetPath: "/tmp/skilldock-smoke-agent/project-one-tdd",
+          status: "valid",
+        },
+        {
+          agentProfileId: "claude",
+          linkName: "project-one-tdd",
+          sourcePath: "/tmp/skilldock-smoke/project-one/skills/tdd",
+          targetPath: "/tmp/skilldock-smoke-claude/project-one-tdd",
+          status: "valid",
+        },
+      ],
       lastModified: "2026-05-10T00:00:00Z",
     },
   ],
@@ -68,12 +83,28 @@ const workspace = {
       profile: {
         id: "codex",
         name: "Codex",
-        skillsDir: "/tmp/skills-collection-smoke-agent",
+        skillsDir: "/tmp/skilldock-smoke-agent",
         enabled: true,
         builtIn: true,
         linkMode: "symlink",
       },
-      skillsDir: "/tmp/skills-collection-smoke-agent",
+      skillsDir: "/tmp/skilldock-smoke-agent",
+      exists: true,
+      writable: true,
+      symlinkCount: 0,
+      workspaceLinkCount: 0,
+      entries: [],
+    },
+    {
+      profile: {
+        id: "claude",
+        name: "Claude Code",
+        skillsDir: "/tmp/skilldock-smoke-claude",
+        enabled: true,
+        builtIn: true,
+        linkMode: "symlink",
+      },
+      skillsDir: "/tmp/skilldock-smoke-claude",
       exists: true,
       writable: true,
       symlinkCount: 0,
@@ -102,22 +133,48 @@ function assertContains(markup, text, label) {
   assert.ok(markup.includes(text), `${label} should contain '${text}'`);
 }
 
+function assertExcludes(markup, text, label) {
+  assert.ok(!markup.includes(text), `${label} should not contain '${text}'`);
+}
+
 try {
-  const { CoreView, WorkspaceSelector } = await server.ssrLoadModule("/src/App.tsx");
+  const appModule = await server.ssrLoadModule("/src/App.tsx");
+  const { default: App, WorkspaceSelector } = appModule;
+  const { CoreView } = await server.ssrLoadModule("/src/CoreView.tsx");
+  const { buildLatestProjectErrorIndex } = await server.ssrLoadModule("/src/views/ProjectsView.tsx");
+  const { applyThemePreference, mergeTaskRecords, preserveLogs } = await server.ssrLoadModule(
+    "/src/lib/shared.tsx",
+  );
   const { restoreRecentWorkspace, selectWorkspace } = await server.ssrLoadModule("/src/lib/commands.ts");
 
   assert.equal(await restoreRecentWorkspace(), null);
   await assert.rejects(
-    () => selectWorkspace("/tmp/skills-collection-smoke"),
+    () => selectWorkspace("/tmp/skilldock-smoke"),
     /Tauri desktop bridge is unavailable/,
   );
+
+  const themeRoot = {
+    dataset: {},
+    style: {
+      colorScheme: "",
+    },
+  };
+  applyThemePreference("dark", themeRoot);
+  assert.equal(themeRoot.dataset.theme, "dark");
+  assert.equal(themeRoot.style.colorScheme, "dark");
+  applyThemePreference("system", themeRoot);
+  assert.equal(themeRoot.dataset.theme, undefined);
+  assert.equal(themeRoot.style.colorScheme, "");
+
+  const app = render(React.createElement(App));
+  assertContains(app, 'src="/app-icon.png"', "app shell brand icon");
 
   const selector = render(
     React.createElement(WorkspaceSelector, {
       message: "Choose a workspace",
       onInputChange: noop,
       onSubmit: noop,
-      value: "/tmp/skills-collection-smoke",
+      value: "/tmp/skilldock-smoke",
     }),
   );
   assertContains(selector, "Workspace path", "workspace selector");
@@ -136,15 +193,18 @@ try {
     onPullAll: noop,
     onPullProject: noop,
     onSetProjectHidden: noop,
+    onThemePreferenceChange: noop,
     onTaskChange: noop,
     onWorkspaceChange: noop,
+    operationBusy: false,
     taskHistory: [task],
     workspace,
   };
 
   const skills = render(React.createElement(CoreView, coreProps));
   assertContains(skills, "TDD", "skills smoke");
-  assertContains(skills, "Preview", "link preview smoke");
+  assertContains(skills, "<span>Installs</span><strong>1</strong>", "install metric smoke");
+  assertContains(skills, "2 installed", "per-agent install smoke");
 
   const projects = render(
     React.createElement(CoreView, {
@@ -153,17 +213,106 @@ try {
     }),
   );
   assertContains(projects, "Project One", "scan/project smoke");
-  assertContains(projects, "0 ahead / 1 behind", "scan/project smoke");
+  assertContains(projects, "1 behind", "scan/project smoke");
+  assertContains(projects, "skill</small>", "scan/project smoke");
+  assertContains(projects, "Pull available", "scan/project smoke");
+  assertExcludes(projects, "license: LICENSE", "scan/project smoke");
+
+  const projectCount = 50000;
+  const largeProjectTask = {
+    ...task,
+    id: "task-large",
+    projectOutcomes: Array.from({ length: projectCount }, (_, index) => ({
+      projectId: `project-${index}`,
+      status: index % 17000 === 0 ? "failed" : "succeeded",
+      summary: `project-${index}`,
+    })),
+  };
+  const errorIndexStart = performance.now();
+  const errorIndex = buildLatestProjectErrorIndex([largeProjectTask], workspace.root);
+  const errorIndexMs = performance.now() - errorIndexStart;
+  assert.equal(errorIndex.size, 3);
+  assert.equal(errorIndex.get("project-0")?.outcome.status, "failed");
+  assert.ok(errorIndexMs < 500, `project error index should stay linear; took ${errorIndexMs}ms`);
+
+  const failedFetch = {
+    ...task,
+    id: "failed-fetch",
+    workspaceRoot: workspace.root,
+    projectOutcomes: [
+      {
+        projectId: "project-one",
+        status: "failed",
+        summary: "fetch failed",
+        error: "fatal: unable to access remote",
+      },
+    ],
+  };
+  const successfulFetch = {
+    ...task,
+    id: "successful-fetch",
+    workspaceRoot: workspace.root,
+    projectOutcomes: [
+      {
+        projectId: "project-one",
+        status: "succeeded",
+        summary: "fetch succeeded",
+      },
+    ],
+  };
+  const refreshedErrorIndex = buildLatestProjectErrorIndex([successfulFetch, failedFetch], workspace.root);
+  assert.equal(refreshedErrorIndex.has("project-one"), false);
 
   const logs = render(
     React.createElement(CoreView, {
       ...coreProps,
-      activeView: "Tasks / Logs",
+      activeView: "Logs",
       focusedTaskId: task.id,
     }),
   );
   assertContains(logs, "Linked TDD into Codex.", "logs smoke");
   assertContains(logs, "Copy raw", "logs smoke");
+
+  // mergeTaskRecords / preserveLogs: verify status-only polls do not clobber
+  // previously-loaded task logs stored in history.
+  const existingWithLogs = {
+    ...task,
+    id: "task-with-logs",
+    stdout: "loaded stdout",
+    stderr: "loaded stderr",
+  };
+  const incomingStripped = {
+    ...task,
+    id: "task-with-logs",
+    stdout: "",
+    stderr: "",
+  };
+  const merged = mergeTaskRecords([incomingStripped], [existingWithLogs]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].stdout, "loaded stdout", "merged stdout should be preserved");
+  assert.equal(merged[0].stderr, "loaded stderr", "merged stderr should be preserved");
+
+  const preserved = preserveLogs(existingWithLogs, incomingStripped);
+  assert.equal(preserved.stdout, "loaded stdout", "preserveLogs retains stdout");
+  assert.equal(preserved.stderr, "loaded stderr", "preserveLogs retains stderr");
+
+  const newerWithLogs = {
+    ...task,
+    id: "task-with-logs",
+    stdout: "fresh stdout",
+    stderr: "",
+  };
+  const mergedNewer = mergeTaskRecords([newerWithLogs], [existingWithLogs]);
+  assert.equal(
+    mergedNewer[0].stdout,
+    "fresh stdout",
+    "incoming stdout should override when non-empty",
+  );
+  assert.equal(
+    mergedNewer[0].stderr,
+    "loaded stderr",
+    "stderr should fall back to existing when incoming is empty",
+  );
 } finally {
   await server.close();
   console.error = originalConsoleError;

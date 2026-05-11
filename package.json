@@ -1,5 +1,5 @@
 {
-  "name": "skills-collection-app",
+  "name": "skilldock",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -10,15 +10,18 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev --features desktop",
     "tauri:build": "tauri build --features desktop",
+    "e2e": "playwright test",
     "ui:smoke": "node scripts/ui-smoke.mjs",
     "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
+    "marked": "^15.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tauri-apps/cli": "^2.0.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

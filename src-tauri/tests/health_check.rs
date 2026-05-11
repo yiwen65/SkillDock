@@ -1,4 +1,4 @@
-use skills_collection_app_lib::health_check;
+use skilldock_lib::health_check;
 
 #[test]
 fn health_check_returns_placeholder_workspace() {

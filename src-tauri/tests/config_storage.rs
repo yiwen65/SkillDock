@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use skills_collection_app_lib::{
+use skilldock_lib::{
     load_user_config_at, load_workspace_config, patch_user_preferences_at, save_user_config_at,
     save_workspace_config, workspace_config_path, AgentProfile, AutomaticCheckSettings,
     ConfigErrorKind, LinkMode, ProjectCategory, ThemePreference, UiPreferences, UserConfig,
@@ -14,7 +14,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "skills_collection_app_{name}_{}_{}",
+        "skilldock_{name}_{}_{}",
         std::process::id(),
         unique
     ));
@@ -40,7 +40,8 @@ fn missing_config_files_load_as_defaults() {
     assert_eq!(user_config.agent_profiles[0].skills_dir, "~/.claude/skills");
     assert_eq!(user_config.agent_profiles[1].id, "codex");
     assert_eq!(user_config.agent_profiles[1].skills_dir, "~/.codex/skills");
-    assert_eq!(user_config.window_size.width, 1200);
+    assert_eq!(user_config.window_size.width, 1440);
+    assert_eq!(user_config.window_size.height, 900);
     assert_eq!(user_config.automatic_checks.enabled, false);
 }
 

@@ -1,6 +1,6 @@
 #[cfg(feature = "desktop")]
 fn main() {
-    skills_collection_app_lib::run();
+    skilldock_lib::run();
 }
 
 #[cfg(not(feature = "desktop"))]

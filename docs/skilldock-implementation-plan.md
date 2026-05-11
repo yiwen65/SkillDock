@@ -1,13 +1,13 @@
-# Skills Collection App 实施计划
+# SkillDock 实施计划
 
 ## Overview
 
-本计划把 [Skills Collection App 设计文档](skills-collection-app.md) 拆成可执行的 Tauri MVP 实施路径。MVP 目标是交付一个本地优先的 Linux/macOS 桌面应用，用图形界面完成 workspace 扫描、项目导入、Git 更新检查、skill 预览、agent profile 管理、软链接安装和卸载。
+本计划把 [SkillDock 设计文档](skilldock.md) 拆成可执行的 Tauri MVP 实施路径。MVP 目标是交付一个本地优先的 Linux/macOS 桌面应用，用图形界面完成 workspace 扫描、项目导入、Git 更新检查、skill 预览、agent profile 管理、软链接安装和卸载。
 
 ## Linked Specification
 
-- Spec: [docs/skills-collection-app.md](skills-collection-app.md)
-- Task breakdown: [docs/skills-collection-app-tasks.md](skills-collection-app-tasks.md)
+- Spec: [docs/skilldock.md](skilldock.md)
+- Task breakdown: [docs/skilldock-tasks.md](skilldock-tasks.md)
 
 ## Clarifications And Assumptions
 
@@ -102,7 +102,7 @@ app/
 1. **Serial task queue in Rust**: Git and symlink operations touch shared resources, so serialization keeps logs and state transitions predictable.
 2. **Preview-before-mutation contract**: Link/unlink batch operations produce an explicit preview result that the UI confirms before execution.
 3. **Filesystem-derived truth**: Project, skill, Git, and installed-agent state are recomputed from disk rather than trusted from metadata.
-4. **Metadata as user preference only**: `.skills-collection/config.json` stores labels, notes, favorites, hidden state and overrides, not authoritative Git or install state.
+4. **Metadata as user preference only**: `.skilldock/config.json` stores labels, notes, favorites, hidden state and overrides, not authoritative Git or install state.
 5. **Structured command boundary**: Rust command responses are typed and mirrored in TypeScript to avoid ad hoc UI parsing of stdout.
 
 ## Implementation Phases
@@ -112,10 +112,10 @@ app/
 **Goal**: Establish a runnable desktop app and the shared domain boundary.
 
 **Tasks**:
-- [ ] [Scaffold Tauri React app](skills-collection-app-tasks.md#task-01-scaffold-tauri-react-app)
-- [ ] [Define shared domain models](skills-collection-app-tasks.md#task-02-define-shared-domain-models)
-- [ ] [Implement config storage](skills-collection-app-tasks.md#task-03-implement-config-storage)
-- [ ] [Implement workspace selection flow](skills-collection-app-tasks.md#task-04-implement-workspace-selection-flow)
+- [ ] [Scaffold Tauri React app](skilldock-tasks.md#task-01-scaffold-tauri-react-app)
+- [ ] [Define shared domain models](skilldock-tasks.md#task-02-define-shared-domain-models)
+- [ ] [Implement config storage](skilldock-tasks.md#task-03-implement-config-storage)
+- [ ] [Implement workspace selection flow](skilldock-tasks.md#task-04-implement-workspace-selection-flow)
 
 **Deliverables**: Runnable app shell, recent workspace persistence, shared model definitions.
 
@@ -124,10 +124,10 @@ app/
 **Goal**: Populate the app from an existing collection workspace without mutating it.
 
 **Tasks**:
-- [ ] [Scan top-level Git projects](skills-collection-app-tasks.md#task-05-scan-top-level-git-projects)
-- [ ] [Scan and parse skills](skills-collection-app-tasks.md#task-06-scan-and-parse-skills)
-- [ ] [Detect installed agent skills](skills-collection-app-tasks.md#task-07-detect-installed-agent-skills)
-- [ ] [Build app navigation and core views](skills-collection-app-tasks.md#task-08-build-app-navigation-and-core-views)
+- [ ] [Scan top-level Git projects](skilldock-tasks.md#task-05-scan-top-level-git-projects)
+- [ ] [Scan and parse skills](skilldock-tasks.md#task-06-scan-and-parse-skills)
+- [ ] [Detect installed agent skills](skilldock-tasks.md#task-07-detect-installed-agent-skills)
+- [ ] [Build app navigation and core views](skilldock-tasks.md#task-08-build-app-navigation-and-core-views)
 
 **Deliverables**: Projects, Skills and Agents views show accurate read-only workspace state.
 
@@ -136,10 +136,10 @@ app/
 **Goal**: Support safe repository import, update checks and fast-forward pulls.
 
 **Tasks**:
-- [ ] [Implement repository import](skills-collection-app-tasks.md#task-09-implement-repository-import)
-- [ ] [Implement update checks](skills-collection-app-tasks.md#task-10-implement-update-checks)
-- [ ] [Implement safe project pull](skills-collection-app-tasks.md#task-11-implement-safe-project-pull)
-- [ ] [Implement serial task queue and logs](skills-collection-app-tasks.md#task-12-implement-serial-task-queue-and-logs)
+- [ ] [Implement repository import](skilldock-tasks.md#task-09-implement-repository-import)
+- [ ] [Implement update checks](skilldock-tasks.md#task-10-implement-update-checks)
+- [ ] [Implement safe project pull](skilldock-tasks.md#task-11-implement-safe-project-pull)
+- [ ] [Implement serial task queue and logs](skilldock-tasks.md#task-12-implement-serial-task-queue-and-logs)
 
 **Deliverables**: Import and Git operations run through logged tasks and refresh affected workspace state.
 
@@ -148,10 +148,10 @@ app/
 **Goal**: Install and uninstall skills through safe symlink previews.
 
 **Tasks**:
-- [x] [Manage agent profiles](skills-collection-app-tasks.md#task-13-manage-agent-profiles)
-- [x] [Implement link preview and single install](skills-collection-app-tasks.md#task-14-implement-link-preview-and-single-install)
-- [x] [Implement batch link workflow](skills-collection-app-tasks.md#task-15-implement-batch-link-workflow)
-- [x] [Implement unlink preview and uninstall](skills-collection-app-tasks.md#task-16-implement-unlink-preview-and-uninstall)
+- [x] [Manage agent profiles](skilldock-tasks.md#task-13-manage-agent-profiles)
+- [x] [Implement link preview and single install](skilldock-tasks.md#task-14-implement-link-preview-and-single-install)
+- [x] [Implement batch link workflow](skilldock-tasks.md#task-15-implement-batch-link-workflow)
+- [x] [Implement unlink preview and uninstall](skilldock-tasks.md#task-16-implement-unlink-preview-and-uninstall)
 
 **Deliverables**: Users can install and uninstall skills for Claude Code, Codex and custom profiles without overwriting unsafe targets.
 
@@ -160,11 +160,11 @@ app/
 **Goal**: Complete MVP screens, settings and regression coverage.
 
 **Tasks**:
-- [ ] [Complete Projects view](skills-collection-app-tasks.md#task-17-complete-projects-view)
-- [ ] [Complete Skills view](skills-collection-app-tasks.md#task-18-complete-skills-view)
-- [ ] [Complete Agents view](skills-collection-app-tasks.md#task-19-complete-agents-view)
-- [ ] [Complete Tasks Logs and Settings views](skills-collection-app-tasks.md#task-20-complete-tasks-logs-and-settings-views)
-- [ ] [Add integration fixtures and tests](skills-collection-app-tasks.md#task-21-add-integration-fixtures-and-tests)
+- [ ] [Complete Projects view](skilldock-tasks.md#task-17-complete-projects-view)
+- [ ] [Complete Skills view](skilldock-tasks.md#task-18-complete-skills-view)
+- [ ] [Complete Agents view](skilldock-tasks.md#task-19-complete-agents-view)
+- [ ] [Complete Tasks Logs and Settings views](skilldock-tasks.md#task-20-complete-tasks-logs-and-settings-views)
+- [ ] [Add integration fixtures and tests](skilldock-tasks.md#task-21-add-integration-fixtures-and-tests)
 
 **Deliverables**: MVP is usable end to end against this collection workspace.
 

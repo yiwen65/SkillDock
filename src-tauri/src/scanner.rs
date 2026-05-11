@@ -19,7 +19,7 @@ pub fn scan_workspace_at(
 ) -> Result<Workspace, WorkspaceError> {
     let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())?;
     let config = load_workspace_config(&workspace_root)
-        .map_err(|error| WorkspaceError::config(Path::new(&error.path), error.message))?;
+        .map_err(WorkspaceError::config)?;
     let mut skills = scan_skills(&workspace_root)?;
     let agent_profile_states = scan_agent_profiles(&workspace_root, &mut skills, agent_profiles)?;
     let projects = scan_projects(&workspace_root, &config, &skills)?;
@@ -32,10 +32,10 @@ pub fn scan_workspace_at(
     })
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn scan_workspace_command(workspace_root: String) -> Result<Workspace, WorkspaceError> {
     let user_config = crate::load_user_config()
-        .map_err(|error| WorkspaceError::config(Path::new(&error.path), error.message))?;
+        .map_err(WorkspaceError::config)?;
     scan_workspace_at(workspace_root, &user_config.agent_profiles)
 }
 
@@ -72,12 +72,13 @@ fn scan_projects(
             .count();
 
         let git_state = local_git_state(&path);
-        let upstream = git_output(
-            &path,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        )
-        .ok();
-        let pull_all_eligible = is_pull_all_eligible(&git_state.status, upstream.as_deref());
+        let remote_url = git_output(&path, &["config", "--get", "remote.origin.url"]).ok();
+        let provider = remote_url
+            .as_deref()
+            .map(detect_provider)
+            .unwrap_or(GitProvider::Unknown);
+        let pull_all_eligible =
+            is_pull_all_eligible(&git_state.status, git_state.upstream.as_deref());
 
         projects.push(Project {
             id: id.clone(),
@@ -85,14 +86,10 @@ fn scan_projects(
                 .and_then(|metadata| metadata.display_name.clone())
                 .unwrap_or_else(|| id.clone()),
             path: path.display().to_string(),
-            remote_url: git_output(&path, &["config", "--get", "remote.origin.url"]).ok(),
-            provider: git_output(&path, &["config", "--get", "remote.origin.url"])
-                .ok()
-                .as_deref()
-                .map(detect_provider)
-                .unwrap_or(GitProvider::Unknown),
-            branch: git_output(&path, &["symbolic-ref", "--short", "HEAD"]).ok(),
-            upstream,
+            remote_url,
+            provider,
+            branch: git_state.branch.clone(),
+            upstream: git_state.upstream.clone(),
             git_status: git_state.status,
             ahead_count: git_state.ahead_count,
             behind_count: git_state.behind_count,
@@ -358,32 +355,46 @@ struct LocalGitState {
     status: GitStatus,
     ahead_count: u32,
     behind_count: u32,
+    branch: Option<String>,
+    upstream: Option<String>,
 }
 
 fn local_git_state(path: &Path) -> LocalGitState {
-    if git_output(path, &["symbolic-ref", "--short", "HEAD"]).is_err() {
-        return git_state(GitStatus::Detached, 0, 0);
-    }
+    let branch = match git_output(path, &["symbolic-ref", "--short", "HEAD"]) {
+        Ok(b) => b,
+        Err(_) => {
+            return LocalGitState {
+                status: GitStatus::Detached,
+                ahead_count: 0,
+                behind_count: 0,
+                branch: None,
+                upstream: None,
+            };
+        }
+    };
 
     let dirty = git_output(path, &["status", "--porcelain=v1"])
         .map(|output| !output.is_empty())
         .unwrap_or(false);
 
-    if git_output(
+    let upstream = git_output(
         path,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     )
-    .is_err()
-    {
-        return git_state(
-            if dirty {
+    .ok();
+
+    if upstream.is_none() {
+        return LocalGitState {
+            status: if dirty {
                 GitStatus::Dirty
             } else {
                 GitStatus::NoUpstream
             },
-            0,
-            0,
-        );
+            ahead_count: 0,
+            behind_count: 0,
+            branch: Some(branch),
+            upstream: None,
+        };
     }
 
     match git_output(
@@ -410,25 +421,25 @@ fn local_git_state(path: &Path) -> LocalGitState {
                     _ => GitStatus::Diverged,
                 }
             };
-            git_state(status, ahead, behind)
+            LocalGitState {
+                status,
+                ahead_count: ahead,
+                behind_count: behind,
+                branch: Some(branch),
+                upstream,
+            }
         }
-        Err(_) => git_state(
-            if dirty {
+        Err(_) => LocalGitState {
+            status: if dirty {
                 GitStatus::Dirty
             } else {
                 GitStatus::Unknown
             },
-            0,
-            0,
-        ),
-    }
-}
-
-fn git_state(status: GitStatus, ahead_count: u32, behind_count: u32) -> LocalGitState {
-    LocalGitState {
-        status,
-        ahead_count,
-        behind_count,
+            ahead_count: 0,
+            behind_count: 0,
+            branch: Some(branch),
+            upstream,
+        },
     }
 }
 
@@ -564,7 +575,7 @@ fn first_relative_component(relative_path: &str) -> Option<&str> {
         })
 }
 
-fn expand_home(path: &str) -> PathBuf {
+pub(crate) fn expand_home(path: &str) -> PathBuf {
     if path == "~" {
         return std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -580,7 +591,7 @@ fn expand_home(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn is_writable_dir(path: &Path) -> bool {
+pub(crate) fn is_writable_dir(path: &Path) -> bool {
     for attempt in 0..3 {
         let probe_path = path.join(unique_writability_probe_name(attempt));
         let write_result = (|| {
@@ -588,7 +599,7 @@ fn is_writable_dir(path: &Path) -> bool {
                 .write(true)
                 .create_new(true)
                 .open(&probe_path)?;
-            file.write_all(b"skills-collection writability probe\n")?;
+            file.write_all(b"skilldock writability probe\n")?;
             file.sync_all()?;
             drop(file);
             fs::remove_file(&probe_path)?;
@@ -614,7 +625,7 @@ fn unique_writability_probe_name(attempt: u8) -> String {
         .unwrap_or_default()
         .as_nanos();
     format!(
-        ".skills-collection-writable-probe-{}-{nanos}-{attempt}.tmp",
+        ".skilldock-writable-probe-{}-{nanos}-{attempt}.tmp",
         std::process::id()
     )
 }

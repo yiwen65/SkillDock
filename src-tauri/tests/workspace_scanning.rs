@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use skills_collection_app_lib::{
+use skilldock_lib::{
     read_skill_markdown_preview_at, resolve_workspace_path_at, save_workspace_config,
     scan_workspace_at, AgentDirectoryEntryKind, AgentProfile, InstalledAgentSkillStatus, LinkMode,
     ProjectCategory, WorkspaceConfig, WorkspaceProjectMetadata, SKILL_MARKDOWN_PREVIEW_MAX_BYTES,
@@ -14,7 +14,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "skills_collection_app_{name}_{}_{}",
+        "skilldock_{name}_{}_{}",
         std::process::id(),
         unique
     ));
@@ -37,7 +37,7 @@ fn read_skill_markdown_preview_is_bounded_and_workspace_scoped() {
     let outside = read_skill_markdown_preview_at(&workspace_root, "../skill-a", 4).unwrap_err();
     assert_eq!(
         outside.kind,
-        skills_collection_app_lib::WorkspaceErrorKind::OutsideWorkspace
+        skilldock_lib::WorkspaceErrorKind::OutsideWorkspace
     );
 }
 
@@ -61,7 +61,7 @@ fn read_skill_markdown_preview_clamps_oversized_requests_and_rejects_absolute_pa
         .unwrap_err();
     assert_eq!(
         absolute.kind,
-        skills_collection_app_lib::WorkspaceErrorKind::OutsideWorkspace
+        skilldock_lib::WorkspaceErrorKind::OutsideWorkspace
     );
 }
 
@@ -83,7 +83,7 @@ fn read_skill_markdown_preview_rejects_symlink_escape() {
     let error = read_skill_markdown_preview_at(&workspace_root, "repo-one/skill-a", 4).unwrap_err();
     assert_eq!(
         error.kind,
-        skills_collection_app_lib::WorkspaceErrorKind::OutsideWorkspace
+        skilldock_lib::WorkspaceErrorKind::OutsideWorkspace
     );
 }
 
@@ -121,7 +121,7 @@ fn resolve_workspace_path_rejects_parent_escape() {
     let error = resolve_workspace_path_at(&workspace_root, &requested).unwrap_err();
     assert_eq!(
         error.kind,
-        skills_collection_app_lib::WorkspaceErrorKind::OutsideWorkspace
+        skilldock_lib::WorkspaceErrorKind::OutsideWorkspace
     );
 }
 
@@ -136,7 +136,7 @@ fn resolve_workspace_path_rejects_symlink_escape() {
     let error = resolve_workspace_path_at(&workspace_root, "outside-link/README.md").unwrap_err();
     assert_eq!(
         error.kind,
-        skills_collection_app_lib::WorkspaceErrorKind::OutsideWorkspace
+        skilldock_lib::WorkspaceErrorKind::OutsideWorkspace
     );
 }
 
@@ -265,7 +265,7 @@ fn scan_workspace_profiles_probe_writable_directories_without_leaving_temp_files
             .unwrap()
             .file_name()
             .to_string_lossy()
-            .starts_with(".skills-collection-writable-probe-")
+            .starts_with(".skilldock-writable-probe-")
     }));
 }
 
@@ -514,13 +514,13 @@ fn scan_workspace_discovers_top_level_git_projects_with_local_status_and_metadat
     );
     assert_eq!(
         scanned.provider,
-        skills_collection_app_lib::GitProvider::Github
+        skilldock_lib::GitProvider::Github
     );
     assert!(scanned.branch.is_some());
     assert_eq!(scanned.upstream, None);
     assert_eq!(
         scanned.git_status,
-        skills_collection_app_lib::GitStatus::Dirty
+        skilldock_lib::GitStatus::Dirty
     );
     assert_eq!(scanned.category, ProjectCategory::Tools);
     assert_eq!(scanned.readme_file.as_deref(), Some("README.md"));
@@ -567,27 +567,27 @@ fn scan_workspace_maps_git_status_fixtures_without_network_dependencies() {
     );
     assert_eq!(
         project("no-upstream").git_status,
-        skills_collection_app_lib::GitStatus::NoUpstream
+        skilldock_lib::GitStatus::NoUpstream
     );
     assert_eq!(project("no-upstream").ahead_count, 0);
     assert_eq!(project("no-upstream").behind_count, 0);
 
     assert_eq!(
         project("dirty").git_status,
-        skills_collection_app_lib::GitStatus::Dirty
+        skilldock_lib::GitStatus::Dirty
     );
     assert_eq!(project("dirty").ahead_count, 0);
     assert_eq!(project("dirty").behind_count, 0);
 
     assert_eq!(
         project("detached").git_status,
-        skills_collection_app_lib::GitStatus::Detached
+        skilldock_lib::GitStatus::Detached
     );
     assert_eq!(project("detached").branch, None);
 
     assert_eq!(
         project("behind").git_status,
-        skills_collection_app_lib::GitStatus::Behind
+        skilldock_lib::GitStatus::Behind
     );
     assert_eq!(project("behind").ahead_count, 0);
     assert_eq!(project("behind").behind_count, 1);
@@ -595,7 +595,7 @@ fn scan_workspace_maps_git_status_fixtures_without_network_dependencies() {
 
     assert_eq!(
         project("ahead").git_status,
-        skills_collection_app_lib::GitStatus::Ahead
+        skilldock_lib::GitStatus::Ahead
     );
     assert_eq!(project("ahead").ahead_count, 1);
     assert_eq!(project("ahead").behind_count, 0);

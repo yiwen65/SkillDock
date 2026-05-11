@@ -1,15 +1,10 @@
 import { invoke as tauriInvoke, type InvokeArgs } from "@tauri-apps/api/core";
 import type {
   AgentProfile,
-  AgentProfileState,
   BatchLinkExecuteRequest,
   BatchLinkOperationResult,
   BatchLinkPreview,
   BatchLinkPreviewRequest,
-  BatchUnlinkExecuteRequest,
-  BatchUnlinkOperationResult,
-  BatchUnlinkPreview,
-  BatchUnlinkPreviewRequest,
   ExecuteLinkSkillRequest,
   ExecuteUnlinkSkillRequest,
   ImportProjectRequest,
@@ -48,10 +43,6 @@ function invokeCommand<T>(command: string, args?: InvokeArgs): Promise<T> {
   return tauriInvoke<T>(command, args);
 }
 
-export function healthCheck(): Promise<Workspace> {
-  return invokeCommand<Workspace>("health_check_command");
-}
-
 export function loadWorkspaceConfig(workspaceRoot: string): Promise<WorkspaceConfig> {
   return invokeCommand<WorkspaceConfig>("load_workspace_config_command", { workspaceRoot });
 }
@@ -67,16 +58,8 @@ export function loadUserConfig(): Promise<UserConfig> {
   return invokeCommand<UserConfig>("load_user_config_command");
 }
 
-export function saveUserConfig(config: UserConfig): Promise<UserConfig> {
-  return invokeCommand<UserConfig>("save_user_config_command", { config });
-}
-
 export function patchUserPreferences(patch: UserPreferencesPatch): Promise<UserConfig> {
   return invokeCommand<UserConfig>("patch_user_preferences_command", { patch });
-}
-
-export function listAgentProfileStates(workspaceRoot: string): Promise<AgentProfileState[]> {
-  return invokeCommand<AgentProfileState[]>("list_agent_profile_states_command", { workspaceRoot });
 }
 
 export function saveAgentProfiles(profiles: AgentProfile[]): Promise<UserConfig> {
@@ -93,10 +76,6 @@ export function createAgentProfileDir(
     profileId,
     confirmed,
   });
-}
-
-export function defaultInstallTargets(): Promise<AgentProfile[]> {
-  return invokeCommand<AgentProfile[]>("default_install_targets_command");
 }
 
 export function restoreRecentWorkspace(): Promise<Workspace | null> {
@@ -204,26 +183,6 @@ export function unlinkSkill(
   return invokeCommand<TaskOperationResult>("unlink_skill_command", { workspaceRoot, request });
 }
 
-export function previewUnlinkSkillsBatch(
-  workspaceRoot: string,
-  request: BatchUnlinkPreviewRequest,
-): Promise<BatchUnlinkPreview> {
-  return invokeCommand<BatchUnlinkPreview>("preview_unlink_skills_batch_command", {
-    workspaceRoot,
-    request,
-  });
-}
-
-export function unlinkSkillsBatch(
-  workspaceRoot: string,
-  request: BatchUnlinkExecuteRequest,
-): Promise<BatchUnlinkOperationResult> {
-  return invokeCommand<BatchUnlinkOperationResult>("unlink_skills_batch_command", {
-    workspaceRoot,
-    request,
-  });
-}
-
 export function getTaskStatus(taskId: string): Promise<TaskRecord | null> {
   return invokeCommand<TaskRecord | null>("get_task_status_command", { taskId });
 }
@@ -238,4 +197,27 @@ export function recentTaskRecords(workspaceRoot?: string, limit?: number): Promi
 
 export function cancelTask(taskId: string): Promise<TaskRecord | null> {
   return invokeCommand<TaskRecord | null>("cancel_task_command", { taskId });
+}
+
+// Desktop window chrome helpers. No-ops when running via Vite without the Tauri bridge
+// so `npm run ui:smoke` and SSR paths don't fail. Errors are swallowed because title/theme
+// cosmetics must not block the app boot or theme switch flow.
+export async function setWindowTitle(title: string): Promise<void> {
+  if (!hasTauriBridge()) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().setTitle(title);
+  } catch {
+    // Non-fatal: older Tauri runtime or webview rejection should not surface here.
+  }
+}
+
+export async function setWindowTheme(theme: "light" | "dark" | null): Promise<void> {
+  if (!hasTauriBridge()) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().setTheme(theme);
+  } catch {
+    // setTheme is only implemented on Windows and macOS 10.14+; ignore on other platforms.
+  }
 }

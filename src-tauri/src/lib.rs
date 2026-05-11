@@ -30,6 +30,10 @@ fn health_check_command() -> Workspace {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            set_app_handle(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             health_check_command,
             load_workspace_config_command,
@@ -65,5 +69,5 @@ pub fn run() {
             unlink_skills_batch_command
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Skills Collection app");
+        .expect("error while running SkillDock app");
 }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     load_user_config_at, load_workspace_config, save_user_config_at, save_workspace_config,
-    SkillMarkdownPreview, UserConfig, Workspace, WorkspaceConfig,
+    ConfigError, SkillMarkdownPreview, UserConfig, Workspace, WorkspaceConfig,
 };
 
 pub const SKILL_MARKDOWN_PREVIEW_MAX_BYTES: usize = 16 * 1024;
@@ -44,11 +44,11 @@ impl WorkspaceError {
         }
     }
 
-    pub(crate) fn config(path: &Path, message: impl Into<String>) -> Self {
+    pub(crate) fn config(error: ConfigError) -> Self {
         Self {
             kind: WorkspaceErrorKind::Config,
-            path: path.display().to_string(),
-            message: message.into(),
+            path: error.path,
+            message: error.message,
         }
     }
 
@@ -79,10 +79,10 @@ pub fn select_workspace_at(
     ensure_workspace_config(&canonical_root)?;
 
     let mut user_config = load_user_config_at(user_config_path.as_ref())
-        .map_err(|error| WorkspaceError::config(Path::new(&error.path), error.message))?;
+        .map_err(WorkspaceError::config)?;
     remember_recent_workspace(&mut user_config, &canonical_root);
     save_user_config_at(user_config_path.as_ref(), &user_config)
-        .map_err(|error| WorkspaceError::config(Path::new(&error.path), error.message))?;
+        .map_err(WorkspaceError::config)?;
 
     crate::scan_workspace_at(&canonical_root, &user_config.agent_profiles)
 }
@@ -91,7 +91,7 @@ pub fn restore_recent_workspace_at(
     user_config_path: impl AsRef<Path>,
 ) -> Result<Option<Workspace>, WorkspaceError> {
     let user_config = load_user_config_at(user_config_path.as_ref())
-        .map_err(|error| WorkspaceError::config(Path::new(&error.path), error.message))?;
+        .map_err(WorkspaceError::config)?;
 
     for workspace_root in user_config.recent_workspaces {
         let path = PathBuf::from(&workspace_root);
@@ -135,7 +135,7 @@ pub fn read_skill_markdown_preview_at(
     })
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn read_skill_markdown_preview_command(
     workspace_root: String,
     skill_id: String,
@@ -144,7 +144,7 @@ pub fn read_skill_markdown_preview_command(
     read_skill_markdown_preview_at(workspace_root, &skill_id, max_bytes)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn open_workspace_path_command(
     workspace_root: String,
     path: String,
@@ -172,12 +172,12 @@ pub fn resolve_workspace_path_at(
     Ok(canonical_path)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command(rename_all = "camelCase"))]
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn select_workspace_command(workspace_root: String) -> Result<Workspace, WorkspaceError> {
     select_workspace_at(workspace_root, crate::default_user_config_path())
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
+#[cfg_attr(feature = "desktop", tauri::command(async))]
 pub fn restore_recent_workspace_command() -> Result<Option<Workspace>, WorkspaceError> {
     restore_recent_workspace_at(crate::default_user_config_path())
 }
@@ -225,7 +225,20 @@ fn open_path(path: &Path) -> Result<(), WorkspaceError> {
     };
 
     #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = {
+    let mut command = if is_wsl() {
+        match wsl_windows_path(path) {
+            Ok(windows_path) => {
+                let mut command = std::process::Command::new("cmd.exe");
+                command.args(["/C", "start", "", &windows_path]);
+                command
+            }
+            Err(_) => {
+                let mut command = std::process::Command::new("xdg-open");
+                command.arg(path);
+                command
+            }
+        }
+    } else {
         let mut command = std::process::Command::new("xdg-open");
         command.arg(path);
         command
@@ -237,11 +250,42 @@ fn open_path(path: &Path) -> Result<(), WorkspaceError> {
         .map_err(|error| WorkspaceError::io(path, error.to_string()))
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+fn is_wsl() -> bool {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|value| {
+            let lower = value.to_ascii_lowercase();
+            lower.contains("microsoft") || lower.contains("wsl")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn wsl_windows_path(path: &Path) -> Result<String, WorkspaceError> {
+    let output = std::process::Command::new("wslpath")
+        .arg("-w")
+        .arg(path)
+        .output()
+        .map_err(|error| WorkspaceError::io(path, error.to_string()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WorkspaceError::io(
+            path,
+            if stderr.is_empty() {
+                "wslpath failed".to_string()
+            } else {
+                stderr
+            },
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn ensure_workspace_config(workspace_root: &Path) -> Result<(), WorkspaceError> {
     let config = load_workspace_config(workspace_root)
-        .map_err(|error| WorkspaceError::config(Path::new(&error.path), error.message))?;
+        .map_err(WorkspaceError::config)?;
     save_workspace_config(workspace_root, &WorkspaceConfig { ..config })
-        .map_err(|error| WorkspaceError::config(Path::new(&error.path), error.message))
+        .map_err(WorkspaceError::config)
 }
 
 fn remember_recent_workspace(user_config: &mut UserConfig, workspace_root: &Path) {

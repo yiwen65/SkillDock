@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use skills_collection_app_lib::{
+use skilldock_lib::{
     restore_recent_workspace_at, select_workspace_at, workspace_config_path, WorkspaceErrorKind,
 };
 
@@ -11,7 +11,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "skills_collection_app_{name}_{}_{}",
+        "skilldock_{name}_{}_{}",
         std::process::id(),
         unique
     ));
