@@ -122,26 +122,14 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          # macOS codesigning + notarization are optional. tauri-action reads
-          # these env vars directly; when the secrets are unset they resolve
-          # to empty strings and signing is skipped, so the current unsigned
-          # path keeps working. Populate the secrets (repo Settings → Secrets
-          # and variables → Actions) to enable signing on the next release.
-          # Full procedure: docs/RELEASING.md.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-          # Tauri updater signing is likewise optional. When TAURI_SIGNING_PRIVATE_KEY
-          # is set, tauri-action produces .sig sidecars next to the updater
-          # bundles (.app.tar.gz, .AppImage) so an in-app updater can verify
-          # downloads. Generate via: npx tauri signer generate -w ~/.tauri/skilldock.key
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS codesign + notarize and Tauri updater signing are opt-in.
+          # They are intentionally NOT wired here as `APPLE_CERTIFICATE: ${{ secrets... }}`
+          # because GitHub Actions resolves unset secrets to the empty string,
+          # and Tauri's bundler treats a defined-but-empty APPLE_CERTIFICATE
+          # as "please sign" — which then fails on `security import`. When
+          # you are ready to sign, follow docs/RELEASING.md to populate the
+          # six Apple secrets (or two updater secrets) and paste the
+          # corresponding env block from that doc back into this step.
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.tauri-args }}

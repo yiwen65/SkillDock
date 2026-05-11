@@ -68,6 +68,21 @@ Set these in **Settings → Secrets and variables → Actions**:
 
 The next release workflow run will sign the `.app`, wrap it in a signed `.dmg`, submit for notarization (Apple's automated malware check), and staple the ticket. Signed bundles launch without Gatekeeper warnings.
 
+### Wiring the env block
+
+After the six Apple secrets are set, paste this block into the `Build and upload bundles` step of `.github/workflows/release.yml` (directly below `GITHUB_TOKEN`):
+
+```yaml
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+```
+
+The env variables are pasted rather than left in the workflow permanently because Tauri's bundler treats a defined-but-empty `APPLE_CERTIFICATE` as "please sign" and then fails on the missing keychain import. Passing the block in only once the secrets actually contain values keeps the unsigned path reliable.
+
 ## Code signing — Linux
 
 Not currently set up. `.AppImage` can be signed with GPG; `.deb` and `.rpm` each use their own signing tooling. If you want to enable this, open an issue — it's additive to the release workflow.
@@ -82,6 +97,12 @@ If you later add an in-app updater, Tauri can verify downloads using an Ed25519 
    ```
    This prints a public key — paste it into `src-tauri/tauri.conf.json` under `plugins.updater.pubkey` when you turn the updater on.
 2. Store the private key contents as the `TAURI_SIGNING_PRIVATE_KEY` secret. If you set a password, store it as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+3. Paste this block into `.github/workflows/release.yml` under `Build and upload bundles` (same reasoning as the Apple block: only add once secrets exist):
+
+   ```yaml
+             TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+             TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+   ```
 
 With these present, `tauri-action` produces `.sig` files alongside the updater bundles (`.app.tar.gz`, `.AppImage`). Without them the release still builds, just without signatures.
 
