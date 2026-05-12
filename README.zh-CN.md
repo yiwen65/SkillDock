@@ -144,6 +144,8 @@ SkillDock/
 
 ## 文档
 
+- [贡献指南](CONTRIBUTING.zh-CN.md) —— 分支流程、必需 CI 检查、发布步骤
+- [发布流程](docs/RELEASING.md)(英文)—— 打 tag、macOS 代码签名与公证、Tauri updater 签名
 - [产品与架构设计](docs/skilldock.md)
 - [实施计划](docs/skilldock-implementation-plan.md)
 - [任务拆分](docs/skilldock-tasks.md)

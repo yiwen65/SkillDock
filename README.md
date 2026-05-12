@@ -144,6 +144,8 @@ Principle: **the filesystem and Git are the source of truth.** Config only store
 
 ## Documentation
 
+- [Contributing guide](CONTRIBUTING.md) — branch workflow, required CI checks, release procedure
+- [Release procedure](docs/RELEASING.md) — tagging, macOS codesign / notarize, Tauri updater signing
 - [Product & architecture design](docs/skilldock.md) (Chinese)
 - [Implementation plan](docs/skilldock-implementation-plan.md) (Chinese)
 - [Task breakdown](docs/skilldock-tasks.md) (Chinese)
