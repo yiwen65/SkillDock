@@ -602,3 +602,63 @@ fn scan_workspace_maps_git_status_fixtures_without_network_dependencies() {
     assert_eq!(project("ahead").behind_count, 0);
     assert!(!project("ahead").pull_all_eligible);
 }
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn spawn_first_available_opener_falls_back_past_missing_programs() {
+    // A program name that is essentially guaranteed not to exist on PATH,
+    // followed by `true`, a no-op binary that is universally available on
+    // POSIX systems. The fallback chain must skip the missing program and
+    // spawn `true` successfully.
+    let path = temp_dir("opener_fallback_ok");
+    let candidates: &[(&str, &[&str])] = &[
+        ("skilldock-definitely-not-a-real-opener", &[]),
+        ("true", &[]),
+    ];
+    skilldock_lib::spawn_first_available_opener(&path, candidates).unwrap();
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn spawn_first_available_opener_reports_last_error_when_all_fail() {
+    let path = temp_dir("opener_fallback_err");
+    let candidates: &[(&str, &[&str])] = &[
+        ("skilldock-missing-opener-alpha", &[]),
+        ("skilldock-missing-opener-beta", &[]),
+    ];
+    let error = skilldock_lib::spawn_first_available_opener(&path, candidates).unwrap_err();
+    assert_eq!(error.kind, skilldock_lib::WorkspaceErrorKind::Io);
+    // The aggregated error message should mention each attempted program
+    // so users can diagnose a broken desktop environment.
+    assert!(
+        error.message.contains("skilldock-missing-opener-alpha"),
+        "error message should list first candidate, got: {}",
+        error.message
+    );
+    assert!(
+        error.message.contains("skilldock-missing-opener-beta"),
+        "error message should list last candidate, got: {}",
+        error.message
+    );
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn linux_path_openers_list_includes_xdg_open_as_primary() {
+    // Lock in the prioritisation so a future refactor doesn't accidentally
+    // demote the XDG-standard entry point below desktop-specific ones.
+    let primary = skilldock_lib::LINUX_PATH_OPENERS
+        .first()
+        .expect("LINUX_PATH_OPENERS should not be empty");
+    assert_eq!(primary.0, "xdg-open");
+    let names: Vec<&str> = skilldock_lib::LINUX_PATH_OPENERS
+        .iter()
+        .map(|(program, _)| *program)
+        .collect();
+    for required in ["xdg-open", "gio", "gnome-open"] {
+        assert!(
+            names.contains(&required),
+            "expected {required} in fallback chain, got {names:?}"
+        );
+    }
+}
