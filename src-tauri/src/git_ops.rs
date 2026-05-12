@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +14,9 @@ use crate::{
     ImportProjectRequest, Project, ProjectTaskRecord, PullAllProjectsRequest, PullProjectRequest,
     TaskKind, TaskOperationResult, TaskOutcome, TaskStatus, Workspace, WorkspaceError,
 };
+
+const IMPORT_CLONE_MAX_ATTEMPTS: usize = 3;
+const IMPORT_CLONE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,14 +65,6 @@ impl GitOperationError {
             kind: GitOperationErrorKind::Io,
             path: Some(error.path),
             message: error.message,
-        }
-    }
-
-    fn io(path: &Path, message: impl Into<String>) -> Self {
-        Self {
-            kind: GitOperationErrorKind::Io,
-            path: Some(path.display().to_string()),
-            message: message.into(),
         }
     }
 }
@@ -147,7 +144,14 @@ pub fn import_project_at(
                 args.push(plan.remote_url.clone());
                 args.push(plan.directory_name.clone());
                 context.stdout(format!("git {}", args.join(" ")));
-                match git_command_output(&workspace_root_for_task, &args) {
+                match clone_with_retries(
+                    &workspace_root_for_task,
+                    &target_path,
+                    &args,
+                    IMPORT_CLONE_MAX_ATTEMPTS,
+                    IMPORT_CLONE_TIMEOUT,
+                    context,
+                ) {
                     Ok((stdout, stderr)) => {
                         TaskOutcome::succeeded(format!("Imported {}", plan.directory_name))
                             .with_stdout(stdout)
@@ -979,6 +983,96 @@ fn is_git_repository(path: &Path) -> bool {
             .unwrap_or(false)
 }
 
+fn clone_with_retries(
+    path: &Path,
+    target_path: &Path,
+    args: &[String],
+    max_attempts: usize,
+    timeout: Duration,
+    context: &mut crate::TaskContext,
+) -> Result<(String, String), (String, String)> {
+    let mut combined_stdout = String::new();
+    let mut combined_stderr = String::new();
+
+    for attempt in 1..=max_attempts {
+        context.stdout(format!("clone attempt {attempt}/{max_attempts}"));
+        match git_command_output_with_timeout(path, args, timeout) {
+            Ok((stdout, stderr)) => {
+                append_log(&mut combined_stdout, &stdout);
+                append_log(&mut combined_stderr, &stderr);
+                return Ok((combined_stdout, combined_stderr));
+            }
+            Err((stdout, stderr)) => {
+                append_log(&mut combined_stdout, &stdout);
+                append_log(&mut combined_stderr, &stderr);
+                if let Err(error) = remove_partial_import_target(target_path) {
+                    append_log(&mut combined_stderr, &error);
+                    context.stderr(error);
+                }
+                if attempt < max_attempts {
+                    context.stderr(format!("clone attempt {attempt} failed; retrying"));
+                }
+            }
+        }
+    }
+
+    Err((combined_stdout, combined_stderr))
+}
+
+fn git_command_output_with_timeout(
+    path: &Path,
+    args: &[String],
+    timeout: Duration,
+) -> Result<(String, String), (String, String)> {
+    if !path.exists() {
+        return Err((
+            String::new(),
+            format!("path does not exist: {}", path.display()),
+        ));
+    }
+
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| (String::new(), error.to_string()))?;
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                let output = child
+                    .wait_with_output()
+                    .map_err(|error| (String::new(), error.to_string()))?;
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                if output.status.success() {
+                    return Ok((stdout, stderr));
+                }
+                return Err((stdout, stderr));
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let output = child
+                    .wait_with_output()
+                    .map_err(|error| (String::new(), error.to_string()))?;
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                append_log(
+                    &mut stderr,
+                    &format!("git command timed out after {} seconds", timeout.as_secs()),
+                );
+                return Err((stdout, stderr));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(error) => return Err((String::new(), error.to_string())),
+        }
+    }
+}
+
 fn git_command_output(path: &Path, args: &[String]) -> Result<(String, String), (String, String)> {
     if !path.exists() {
         return Err((
@@ -1002,15 +1096,33 @@ fn git_command_output(path: &Path, args: &[String]) -> Result<(String, String), 
     }
 }
 
-#[allow(dead_code)]
-fn remove_empty_created_dir(path: &Path) -> Result<(), GitOperationError> {
-    if path.exists()
-        && fs::read_dir(path)
-            .map_err(|error| GitOperationError::io(path, error.to_string()))?
-            .next()
-            .is_none()
-    {
-        fs::remove_dir(path).map_err(|error| GitOperationError::io(path, error.to_string()))?;
+fn remove_partial_import_target(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
     }
-    Ok(())
+    if path.is_dir() {
+        fs::remove_dir_all(path).map_err(|error| {
+            format!(
+                "failed to remove partial clone '{}': {error}",
+                path.display()
+            )
+        })
+    } else {
+        fs::remove_file(path).map_err(|error| {
+            format!(
+                "failed to remove partial clone '{}': {error}",
+                path.display()
+            )
+        })
+    }
+}
+
+fn append_log(target: &mut String, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    target.push_str(text);
+    if !target.ends_with('\n') {
+        target.push('\n');
+    }
 }
