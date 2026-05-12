@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { SummaryMetric, type ThemePreference, type ViewName } from "./lib/shared";
+import { SummaryMetric, type ViewName } from "./lib/shared";
 import type {
   AgentProfileState,
   BatchLinkOperationResult,
@@ -21,7 +21,6 @@ export function CoreView({
   onCreateAgentDir,
   onBatchLinkResult,
   onOperationResult,
-  onThemePreferenceChange,
   onWorkspaceChange,
   onTaskChange,
   onOpenTaskLog,
@@ -40,7 +39,6 @@ export function CoreView({
   onCreateAgentDir: (profile: AgentProfileState) => void;
   onBatchLinkResult: (result: BatchLinkOperationResult) => void;
   onOperationResult: (result: TaskOperationResult) => void;
-  onThemePreferenceChange: (theme: ThemePreference) => void;
   onWorkspaceChange: (workspace: Workspace, message: string) => void;
   onTaskChange: (task: TaskRecord) => void;
   onOpenTaskLog: (taskId: string) => void;
@@ -89,11 +87,7 @@ export function CoreView({
         <TasksView focusedTaskId={focusedTaskId} onTaskChange={onTaskChange} tasks={taskHistory} />
       )}
       {activeView === "Settings" && (
-        <SettingsView
-          onThemePreferenceChange={onThemePreferenceChange}
-          onWorkspaceChange={onWorkspaceChange}
-          workspace={workspace}
-        />
+        <SettingsView onWorkspaceChange={onWorkspaceChange} workspace={workspace} />
       )}
     </>
   );
@@ -111,11 +105,62 @@ function WorkspaceMetrics({ workspace }: { workspace: Workspace }) {
 
   return (
     <div className="metric-strip">
-      <SummaryMetric label="Projects" value={workspace.projects.length} />
-      <SummaryMetric label="Skills" value={workspace.skills.length} />
-      <SummaryMetric label="Agents" value={workspace.agentProfiles.length} />
-      <SummaryMetric label="Installs" value={installedCount} />
+      <SummaryMetric
+        icon={<MetricIcon kind="projects" />}
+        label="Projects"
+        value={workspace.projects.length}
+      />
+      <SummaryMetric
+        icon={<MetricIcon kind="skills" />}
+        label="Skills"
+        value={workspace.skills.length}
+      />
+      <SummaryMetric
+        icon={<MetricIcon kind="agents" />}
+        label="Agents"
+        value={workspace.agentProfiles.length}
+      />
+      <SummaryMetric
+        icon={<MetricIcon kind="installs" />}
+        label="Installs"
+        value={installedCount}
+      />
     </div>
+  );
+}
+
+function MetricIcon({ kind }: { kind: "agents" | "installs" | "projects" | "skills" }) {
+  if (kind === "projects") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M3 7.5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+        <path d="M3 10h18" />
+      </svg>
+    );
+  }
+  if (kind === "agents") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M8 10a4 4 0 1 1 8 0" />
+        <path d="M4 20a8 8 0 0 1 16 0" />
+        <path d="M9 13h6" />
+      </svg>
+    );
+  }
+  if (kind === "installs") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 20h14" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="m12 2 2.2 6.2L20 10.5l-5.8 2.2L12 19l-2.2-6.3L4 10.5l5.8-2.3Z" />
+      <path d="m19 4 .8 2.2L22 7l-2.2.8L19 10l-.8-2.2L16 7l2.2-.8Z" />
+    </svg>
   );
 }
 

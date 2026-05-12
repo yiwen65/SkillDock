@@ -81,7 +81,7 @@ test("selects a workspace and validates the skills-centered MVP flow", async ({ 
     .getByRole("button", { name: "Install", exact: true });
   await expect(singleInstall).toBeEnabled();
   await singleInstall.click();
-  await expect(page.getByText("Linked TDD into Claude Code.")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Linked TDD into Claude Code.");
 
   // The Installs metric counts distinct skills that have at least one
   // install, not total links. TDD was already installed in Codex in the
@@ -95,7 +95,9 @@ test("selects a workspace and validates the skills-centered MVP flow", async ({ 
   await batchSection.getByRole("button", { name: "Select visible" }).click();
   await batchSection.getByRole("checkbox", { name: "Codex" }).check();
   await batchSection.getByRole("button", { name: "Install", exact: true }).click();
-  await expect(page.getByText("1 linked, 1 already installed, 0 skipped, 0 failed.")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Batch link: 1 linked, 1 already installed, 0 skipped, 0 failed.",
+  );
   await expect(page.locator(".metric").filter({ hasText: "Installs" })).toContainText("2");
 });
 
@@ -165,7 +167,7 @@ test("covers agent profile creation, missing directory creation and safe unlink"
   await page.getByLabel("Name").fill("Aider");
   await page.getByLabel("Skills directory").fill("/tmp/e2e-aider");
   await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(page.getByText("Aider saved.")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Aider saved.");
   await expect(page.getByRole("heading", { name: "Aider" })).toBeVisible();
 
   // Uninstall flow: the earlier "Preview uninstall → Execute uninstall"
@@ -173,7 +175,7 @@ test("covers agent profile creation, missing directory creation and safe unlink"
   // linked-skill row. In the mock, only TDD is linked (into Codex), so
   // .first() unambiguously hits that row's Uninstall control.
   await page.getByRole("button", { name: "Uninstall", exact: true }).first().click();
-  await expect(page.getByText("Unlinked agent-skills-tdd from Codex.")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Unlinked agent-skills-tdd from Codex.");
   await expect(page.getByText("No workspace skills linked.").first()).toBeVisible();
 });
 

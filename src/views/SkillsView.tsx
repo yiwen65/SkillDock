@@ -346,11 +346,14 @@ export function SkillsView({
         <div className="skill-filter-grid">
           <label>
             <span>Search</span>
-            <input
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Name, description or path"
-              value={query}
-            />
+            <span className="input-with-icon">
+              <SearchIcon />
+              <input
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Name, description or path"
+                value={query}
+              />
+            </span>
           </label>
           <label>
             <span>Project</span>
@@ -418,16 +421,20 @@ export function SkillsView({
         />
         {selectedSkill && (
           <>
-            {selectedSkill.description && (
-              <p className="detail-description">{selectedSkill.description}</p>
-            )}
-            <div className="skill-detail-facts" aria-label="Selected skill summary">
-              <span>{selectedProject?.name ?? selectedSkill.sourceProjectId}</span>
-              <span>
-                {selectedInstalledProfiles.length > 0
-                  ? `${selectedInstalledProfiles.length} installed`
-                  : "Not installed"}
-              </span>
+            <div className="skill-detail-hero">
+              <div>
+                {selectedSkill.description && (
+                  <p className="detail-description">{selectedSkill.description}</p>
+                )}
+                <div className="skill-detail-facts" aria-label="Selected skill summary">
+                  <span>{selectedProject?.name ?? selectedSkill.sourceProjectId}</span>
+                  <span>
+                    {selectedInstalledProfiles.length > 0
+                      ? `${selectedInstalledProfiles.length} installed`
+                      : "Not installed"}
+                  </span>
+                </div>
+              </div>
             </div>
             <div className="panel-actions">
               <button
@@ -436,7 +443,16 @@ export function SkillsView({
                 onClick={() => openPath(selectedSkill.absolutePath, "skill path")}
                 type="button"
               >
-                Open folder
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path d="M3 7.5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                </svg>
+                Open
               </button>
               <button
                 className="secondary-button"
@@ -452,6 +468,16 @@ export function SkillsView({
                 onClick={previewSkillMarkdown}
                 type="button"
               >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path d="M2 12s3.7-7 10-7 10 7 10 7-3.7 7-10 7S2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
                 Preview
               </button>
             </div>
@@ -652,5 +678,14 @@ function SkillRow({
         <span className="skill-repo-name">{project?.name ?? skill.sourceProjectId}</span>
       </div>
     </article>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m16 16 4 4" />
+    </svg>
   );
 }
