@@ -268,48 +268,98 @@ pub const LINUX_PATH_OPENERS: &[(&str, &[&str])] = &[
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn spawn_opener(path: &Path) -> Result<(), WorkspaceError> {
+    let mut attempts: Vec<String> = Vec::new();
+    let mut wsl_interop_broken = false;
+
     if is_wsl() {
-        if let Ok(windows_path) = wsl_windows_path(path) {
-            let mut command = std::process::Command::new("cmd.exe");
-            command.args(["/C", "start", "", &windows_path]);
-            command.stdin(std::process::Stdio::null());
-            command.stdout(std::process::Stdio::piped());
-            command.stderr(std::process::Stdio::piped());
-            if let Ok(output) = command.output() {
-                if output.status.success() {
-                    return Ok(());
+        match wsl_windows_path(path) {
+            Ok(windows_path) => {
+                let mut command = std::process::Command::new("cmd.exe");
+                command.args(["/C", "start", "", &windows_path]);
+                command.stdin(std::process::Stdio::null());
+                command.stdout(std::process::Stdio::piped());
+                command.stderr(std::process::Stdio::piped());
+                match command.output() {
+                    Ok(output) if output.status.success() => return Ok(()),
+                    Ok(output) => {
+                        let status = output
+                            .status
+                            .code()
+                            .map(|code| format!("status {code}"))
+                            .unwrap_or_else(|| "signal".to_string());
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let stderr = stderr.trim();
+                        if stderr.is_empty() {
+                            attempts.push(format!("cmd.exe exited with {status}"));
+                        } else {
+                            let truncated: String = stderr.chars().take(240).collect();
+                            attempts.push(format!("cmd.exe ({status}): {truncated}"));
+                        }
+                    }
+                    Err(err) => {
+                        // ENOEXEC (os error 8) when exec-ing /mnt/c/.../cmd.exe
+                        // specifically indicates the distro has Windows interop
+                        // disabled — either `/etc/wsl.conf` sets
+                        // `[interop] enabled=false`, or the `binfmt_misc`
+                        // handler for PE binaries is missing. That's what the
+                        // shell itself reports as "可执行文件格式错误".
+                        if err.raw_os_error() == Some(8) {
+                            wsl_interop_broken = true;
+                        }
+                        attempts.push(format!("cmd.exe failed to spawn: {err}"));
+                    }
                 }
+                // Either spawn failed or cmd.exe exited non-zero; fall
+                // through to the native Linux opener chain so a broken
+                // WSL interop setup still leaves a chance of opening the
+                // path on the Linux side.
             }
-            // cmd.exe either failed to spawn or exited non-zero; fall
-            // through to the native Linux opener chain below so that a
-            // broken WSL interop setup still leaves a chance of opening
-            // the path on the Linux side.
+            Err(err) => {
+                attempts.push(format!("wslpath -w failed: {}", err.message));
+            }
         }
     }
-    spawn_first_available_opener(path, LINUX_PATH_OPENERS)
+
+    if try_openers(path, LINUX_PATH_OPENERS, &mut attempts).is_ok() {
+        return Ok(());
+    }
+
+    let mut message = if attempts.is_empty() {
+        "No openers configured for this platform.".to_string()
+    } else {
+        format!(
+            "No working file opener on this system. Tried: {}.",
+            attempts.join(" | "),
+        )
+    };
+    if wsl_interop_broken {
+        message.push_str(
+            " Your WSL distro appears to have Windows interop disabled \
+             (running cmd.exe returns 'Exec format error' / os error 8). \
+             Add `[interop]\\nenabled=true` to /etc/wsl.conf, then run \
+             `wsl.exe --shutdown` from Windows PowerShell or cmd and \
+             reopen the distro.",
+        );
+    } else {
+        message.push_str(
+            " Install xdg-utils (for xdg-open) or a GUI file manager \
+             such as thunar, nautilus, nemo, dolphin, pcmanfm, or caja.",
+        );
+    }
+    Err(WorkspaceError::io(path, message))
 }
 
-/// Run the first candidate opener that both spawns *and* exits with a
-/// success status, returning `Ok(())` on the first win. Openers like
-/// `xdg-open` may spawn cleanly and then fail internally — for example, on
-/// a headless Linux system with no desktop environment they cycle through
-/// every browser they know about, print "... not found" to stderr, and
-/// exit non-zero. A `spawn`-only check would treat that as success and
-/// leave the user with a silently broken "Open" button.
-///
-/// Stdin is nulled and stdout/stderr are captured so xdg-open's chatty
-/// fallback output does not leak into the terminal the app was launched
-/// from; the captured stderr is folded into the aggregated error message
-/// when every candidate fails so users can see *why* each one failed.
-///
-/// Exposed (rather than kept private) so integration tests can exercise
-/// the fallback chain with synthetic candidates.
+/// Internal loop shared between the public `spawn_first_available_opener`
+/// entry point (used by tests) and the WSL-integrated `spawn_opener` path.
+/// Returns `Ok(())` on the first candidate that both spawns and exits with
+/// a success status; appends one description per failure to `attempts` and
+/// returns `Err(())` if every candidate fails.
 #[cfg(all(unix, not(target_os = "macos")))]
-pub fn spawn_first_available_opener(
+fn try_openers(
     path: &Path,
     candidates: &[(&str, &[&str])],
-) -> Result<(), WorkspaceError> {
-    let mut attempts: Vec<String> = Vec::new();
+    attempts: &mut Vec<String>,
+) -> Result<(), ()> {
     for (program, prefix_args) in candidates {
         let mut command = std::process::Command::new(program);
         command.args(*prefix_args);
@@ -338,6 +388,33 @@ pub fn spawn_first_available_opener(
                 attempts.push(format!("{program} failed to spawn: {err}"));
             }
         }
+    }
+    Err(())
+}
+
+/// Run the first candidate opener that both spawns *and* exits with a
+/// success status, returning `Ok(())` on the first win. Openers like
+/// `xdg-open` may spawn cleanly and then fail internally — for example, on
+/// a headless Linux system with no desktop environment they cycle through
+/// every browser they know about, print "... not found" to stderr, and
+/// exit non-zero. A `spawn`-only check would treat that as success and
+/// leave the user with a silently broken "Open" button.
+///
+/// Stdin is nulled and stdout/stderr are captured so xdg-open's chatty
+/// fallback output does not leak into the terminal the app was launched
+/// from; the captured stderr is folded into the aggregated error message
+/// when every candidate fails so users can see *why* each one failed.
+///
+/// Exposed (rather than kept private) so integration tests can exercise
+/// the fallback chain with synthetic candidates.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn spawn_first_available_opener(
+    path: &Path,
+    candidates: &[(&str, &[&str])],
+) -> Result<(), WorkspaceError> {
+    let mut attempts: Vec<String> = Vec::new();
+    if try_openers(path, candidates, &mut attempts).is_ok() {
+        return Ok(());
     }
     let message = if attempts.is_empty() {
         "No openers configured for this platform.".to_string()
