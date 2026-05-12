@@ -210,44 +210,96 @@ fn safe_relative_path(path: &str) -> Result<PathBuf, WorkspaceError> {
 }
 
 fn open_path(path: &Path) -> Result<(), WorkspaceError> {
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = std::process::Command::new("open");
-        command.arg(path);
-        command
-    };
+    spawn_opener(path)
+}
 
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = std::process::Command::new("cmd");
-        command.args(["/C", "start", "", &path.display().to_string()]);
-        command
-    };
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = if is_wsl() {
-        match wsl_windows_path(path) {
-            Ok(windows_path) => {
-                let mut command = std::process::Command::new("cmd.exe");
-                command.args(["/C", "start", "", &windows_path]);
-                command
-            }
-            Err(_) => {
-                let mut command = std::process::Command::new("xdg-open");
-                command.arg(path);
-                command
-            }
-        }
-    } else {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(path);
-        command
-    };
-
+#[cfg(target_os = "macos")]
+fn spawn_opener(path: &Path) -> Result<(), WorkspaceError> {
+    let mut command = std::process::Command::new("open");
+    command.arg(path);
     command
         .spawn()
         .map(|_| ())
         .map_err(|error| WorkspaceError::io(path, error.to_string()))
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_opener(path: &Path) -> Result<(), WorkspaceError> {
+    let mut command = std::process::Command::new("cmd");
+    command.args(["/C", "start", "", &path.display().to_string()]);
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| WorkspaceError::io(path, error.to_string()))
+}
+
+/// Prioritised list of programs used to open a filesystem path on Linux
+/// desktops. `xdg-open` is the XDG-standard entry point, but on some systems
+/// it is missing, shadowed by a non-executable file (producing ENOEXEC —
+/// "Exec format error (os error 8)"), or otherwise broken. We therefore fall
+/// back through the openers shipped with the major desktop stacks and WSL
+/// before surfacing a single aggregated error to the user.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const LINUX_PATH_OPENERS: &[(&str, &[&str])] = &[
+    ("xdg-open", &[]),
+    ("gio", &["open"]),
+    ("gnome-open", &[]),
+    ("kde-open5", &[]),
+    ("kde-open", &[]),
+    ("wslview", &[]),
+];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn spawn_opener(path: &Path) -> Result<(), WorkspaceError> {
+    if is_wsl() {
+        if let Ok(windows_path) = wsl_windows_path(path) {
+            let mut command = std::process::Command::new("cmd.exe");
+            command.args(["/C", "start", "", &windows_path]);
+            if command.spawn().is_ok() {
+                return Ok(());
+            }
+            // cmd.exe spawn failed (rare inside WSL); fall through to the
+            // native Linux opener chain below.
+        }
+    }
+    spawn_first_available_opener(path, LINUX_PATH_OPENERS)
+}
+
+/// Spawn the first candidate opener that successfully `spawn`s. Returns the
+/// last error if every candidate fails. Exposed (rather than kept private) so
+/// integration tests can exercise the fallback chain with synthetic
+/// candidates.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn spawn_first_available_opener(
+    path: &Path,
+    candidates: &[(&str, &[&str])],
+) -> Result<(), WorkspaceError> {
+    let mut last_error: Option<(String, String)> = None;
+    for (program, prefix_args) in candidates {
+        let mut command = std::process::Command::new(program);
+        command.args(*prefix_args);
+        command.arg(path);
+        match command.spawn() {
+            Ok(_) => return Ok(()),
+            Err(err) => {
+                last_error = Some(((*program).to_string(), err.to_string()));
+            }
+        }
+    }
+    let tried = candidates
+        .iter()
+        .map(|(program, _)| *program)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let message = match last_error {
+        Some((program, err)) => format!(
+            "No working file opener on PATH. Tried: {tried}. \
+             Last error from '{program}': {err}. \
+             Install xdg-utils, gio (glib), or a desktop-specific opener."
+        ),
+        None => "No openers configured for this platform.".to_string(),
+    };
+    Err(WorkspaceError::io(path, message))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
