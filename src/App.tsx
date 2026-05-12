@@ -14,8 +14,8 @@ import {
   scanWorkspace,
   selectWorkspace,
   setWindowTheme,
-  setWindowTitle,
 } from "./lib/commands";
+import { openWorkspacePathWithCopyFallback } from "./lib/openPathFallback";
 import {
   applyThemePreference,
   errorMessage,
@@ -41,6 +41,15 @@ const CoreViewLazy = lazy(() => import("./CoreView"));
 const TASKS_IDLE_POLL_MS = 5000;
 // Max number of recent task records to fetch per poll; matches backend cap behaviour.
 const TASKS_RECENT_LIMIT = 80;
+
+const navMeta: Record<ViewName, { icon: "agents" | "logs" | "projects" | "settings" | "skills" }> =
+  {
+    Agents: { icon: "agents" },
+    Logs: { icon: "logs" },
+    Projects: { icon: "projects" },
+    Settings: { icon: "settings" },
+    Skills: { icon: "skills" },
+  };
 
 type LoadState =
   | { status: "loading"; message: string }
@@ -148,14 +157,6 @@ function App() {
     const osTheme: "light" | "dark" | null = themePreference === "system" ? null : themePreference;
     void setWindowTheme(osTheme);
   }, [themePreference]);
-
-  // Keep the OS window title in sync with the current workspace so multi-window /
-  // taskbar / Dock entries are distinguishable. Falls back to the bare product name.
-  useEffect(() => {
-    const root = readyWorkspace?.root;
-    const title = root && root.length > 0 ? `SkillDock — ${root}` : "SkillDock";
-    void setWindowTitle(title);
-  }, [readyWorkspace?.root]);
 
   useEffect(() => {
     if (!readyWorkspace) {
@@ -274,6 +275,19 @@ function App() {
     } finally {
       refreshWorkspaceBusyRef.current = false;
     }
+  };
+
+  const openCurrentWorkspace = async () => {
+    if (!readyWorkspace) {
+      return;
+    }
+    setOperationMessage(
+      await openWorkspacePathWithCopyFallback({
+        label: "workspace directory",
+        path: readyWorkspace.root,
+        workspaceRoot: readyWorkspace.root,
+      }),
+    );
   };
 
   const applyOperationResult = (result: TaskOperationResult) => {
@@ -454,7 +468,10 @@ function App() {
               onClick={() => setActiveView(view)}
               type="button"
             >
-              {view}
+              <span className="nav-icon" aria-hidden="true">
+                <NavIcon kind={navMeta[view].icon} />
+              </span>
+              <span>{view}</span>
             </button>
           ))}
         </nav>
@@ -469,12 +486,20 @@ function App() {
           <div className="topbar-actions">
             {readyWorkspace && (
               <button className="secondary-button" onClick={refreshWorkspace} type="button">
+                <RefreshIcon />
                 Refresh
               </button>
             )}
-            <code className="workspace-path" title={workspacePath}>
+            <button
+              className="workspace-path"
+              disabled={!readyWorkspace}
+              onClick={openCurrentWorkspace}
+              title={readyWorkspace ? `Open ${workspacePath}` : workspacePath}
+              type="button"
+            >
+              <PathIcon />
               {workspacePath}
-            </code>
+            </button>
           </div>
         </header>
 
@@ -546,7 +571,6 @@ function App() {
                 onCreateAgentDir={createMissingAgentDir}
                 onBatchLinkResult={applyBatchLinkResult}
                 onOperationResult={applyOperationResult}
-                onThemePreferenceChange={setThemePreference}
                 onWorkspaceChange={applyWorkspaceChange}
                 onTaskChange={updateTaskRecord}
                 onSetProjectHidden={setProjectHidden}
@@ -558,6 +582,63 @@ function App() {
         </section>
       </section>
     </main>
+  );
+}
+
+function NavIcon({ kind }: { kind: "agents" | "logs" | "projects" | "settings" | "skills" }) {
+  if (kind === "projects") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M3 7.5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      </svg>
+    );
+  }
+  if (kind === "agents") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M8 10a4 4 0 1 1 8 0" />
+        <path d="M4 20a8 8 0 0 1 16 0" />
+      </svg>
+    );
+  }
+  if (kind === "logs") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M5 7h14" />
+        <path d="M5 12h14" />
+        <path d="M5 17h10" />
+      </svg>
+    );
+  }
+  if (kind === "settings") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+        <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2.1 2.1 0 1 1-2.98 2.98l-.04-.04A1.8 1.8 0 0 0 14.8 19.6a1.8 1.8 0 0 0-1.08 1.64V21a2.1 2.1 0 1 1-4.2 0v-.06A1.8 1.8 0 0 0 8.4 19.3a1.8 1.8 0 0 0-1.98.36l-.04.04A2.1 2.1 0 1 1 3.4 16.72l.04-.04A1.8 1.8 0 0 0 3.8 14.7a1.8 1.8 0 0 0-1.64-1.08H2.1a2.1 2.1 0 1 1 0-4.2h.06A1.8 1.8 0 0 0 3.8 8.3a1.8 1.8 0 0 0-.36-1.98l-.04-.04A2.1 2.1 0 1 1 6.38 3.3l.04.04A1.8 1.8 0 0 0 8.4 3.7a1.8 1.8 0 0 0 1.08-1.64V2a2.1 2.1 0 1 1 4.2 0v.06A1.8 1.8 0 0 0 14.8 3.7a1.8 1.8 0 0 0 1.98-.36l.04-.04a2.1 2.1 0 1 1 2.98 2.98l-.04.04A1.8 1.8 0 0 0 19.4 8.3a1.8 1.8 0 0 0 1.64 1.08h.06a2.1 2.1 0 1 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="m12 2 2.2 6.2L20 10.5l-5.8 2.2L12 19l-2.2-6.3L4 10.5l5.8-2.3Z" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+      <path d="M20 4v7h-7" />
+    </svg>
+  );
+}
+
+function PathIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M3 7.5a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
   );
 }
 

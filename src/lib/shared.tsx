@@ -97,15 +97,22 @@ export function PanelHeader({ detail, title }: { detail: string; title: string }
 }
 
 export const SummaryMetric = React.memo(function SummaryMetric({
+  icon,
   label,
   value,
 }: {
+  icon?: React.ReactNode;
   label: string;
   value: number;
 }) {
   return (
     <article className="metric">
-      <span>{label}</span>
+      {icon && (
+        <span className="metric-icon" aria-hidden="true">
+          {icon}
+        </span>
+      )}
+      <span className="metric-label">{label}</span>
       <strong>{value}</strong>
     </article>
   );

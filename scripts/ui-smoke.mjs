@@ -146,8 +146,9 @@ try {
   );
   const { applyThemePreference, mergeTaskRecords, preserveLogs } =
     await server.ssrLoadModule("/src/lib/shared.tsx");
-  const { openWorkspacePathWithCopyFallback } =
-    await server.ssrLoadModule("/src/lib/openPathFallback.ts");
+  const { openWorkspacePathWithCopyFallback } = await server.ssrLoadModule(
+    "/src/lib/openPathFallback.ts",
+  );
   const { restoreRecentWorkspace, selectWorkspace } =
     await server.ssrLoadModule("/src/lib/commands.ts");
 
@@ -223,7 +224,11 @@ try {
 
   const skills = render(React.createElement(CoreView, coreProps));
   assertContains(skills, "TDD", "skills smoke");
-  assertContains(skills, "<span>Installs</span><strong>1</strong>", "install metric smoke");
+  assertContains(
+    skills,
+    '<span class="metric-label">Installs</span><strong>1</strong>',
+    "install metric smoke",
+  );
   assertContains(skills, "2 installed", "per-agent install smoke");
 
   const projects = render(
