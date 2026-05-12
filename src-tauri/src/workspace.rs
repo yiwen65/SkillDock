@@ -236,9 +236,19 @@ fn spawn_opener(path: &Path) -> Result<(), WorkspaceError> {
 /// Prioritised list of programs used to open a filesystem path on Linux
 /// desktops. `xdg-open` is the XDG-standard entry point, but on some systems
 /// it is missing, shadowed by a non-executable file (producing ENOEXEC —
-/// "Exec format error (os error 8)"), or otherwise broken. We therefore fall
-/// back through the openers shipped with the major desktop stacks and WSL
-/// before surfacing a single aggregated error to the user.
+/// "Exec format error (os error 8)"), or spawns cleanly and then exits
+/// non-zero because no handler is registered for the path's MIME type. We
+/// therefore walk three tiers of fallbacks:
+///
+/// 1. XDG / GLib entry points (`xdg-open`, `gio open`) — the right thing on
+///    a correctly-configured desktop.
+/// 2. Desktop-specific wrappers (`gnome-open`, `kde-open5`, `kde-open`,
+///    `wslview`).
+/// 3. Direct file-manager binaries (`nautilus`, `thunar`, `nemo`,
+///    `dolphin`, `pcmanfm`, `pcmanfm-qt`, `caja`) — catches minimal
+///    installs and tiling-WM setups where a file manager is installed but
+///    no `inode/directory` MIME handler is registered, so `xdg-open` and
+///    `gio open` both give up.
 #[cfg(all(unix, not(target_os = "macos")))]
 pub const LINUX_PATH_OPENERS: &[(&str, &[&str])] = &[
     ("xdg-open", &[]),
@@ -247,6 +257,13 @@ pub const LINUX_PATH_OPENERS: &[(&str, &[&str])] = &[
     ("kde-open5", &[]),
     ("kde-open", &[]),
     ("wslview", &[]),
+    ("nautilus", &[]),
+    ("thunar", &[]),
+    ("nemo", &[]),
+    ("dolphin", &[]),
+    ("pcmanfm", &[]),
+    ("pcmanfm-qt", &[]),
+    ("caja", &[]),
 ];
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -327,8 +344,8 @@ pub fn spawn_first_available_opener(
     } else {
         format!(
             "No working file opener on this system. Tried: {}. \
-             Install a desktop environment, a GUI file manager, \
-             or xdg-utils / gio.",
+             Install xdg-utils (for xdg-open) or a GUI file manager \
+             such as thunar, nautilus, nemo, dolphin, pcmanfm, or caja.",
             attempts.join(" | "),
         )
     };

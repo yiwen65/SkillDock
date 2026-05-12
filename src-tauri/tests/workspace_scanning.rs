@@ -679,21 +679,44 @@ fn spawn_first_available_opener_aggregates_nonzero_exit_in_error() {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 #[test]
-fn linux_path_openers_list_includes_xdg_open_as_primary() {
+fn linux_path_openers_list_includes_xdg_open_as_primary_and_gui_fallbacks() {
     // Lock in the prioritisation so a future refactor doesn't accidentally
-    // demote the XDG-standard entry point below desktop-specific ones.
+    // demote the XDG-standard entry point below desktop-specific ones, and
+    // so the direct file-manager tier (needed on minimal installs where no
+    // inode/directory MIME handler is registered) is preserved.
     let primary = skilldock_lib::LINUX_PATH_OPENERS
         .first()
         .expect("LINUX_PATH_OPENERS should not be empty");
     assert_eq!(primary.0, "xdg-open");
+
     let names: Vec<&str> = skilldock_lib::LINUX_PATH_OPENERS
         .iter()
         .map(|(program, _)| *program)
         .collect();
-    for required in ["xdg-open", "gio", "gnome-open"] {
+
+    // Tier 1: XDG / GLib standard entry points.
+    for required in ["xdg-open", "gio"] {
         assert!(
             names.contains(&required),
             "expected {required} in fallback chain, got {names:?}"
         );
     }
+    // Tier 3: direct file-manager binaries covering the major desktops.
+    for required in ["nautilus", "thunar", "dolphin"] {
+        assert!(
+            names.contains(&required),
+            "expected {required} in fallback chain, got {names:?}"
+        );
+    }
+
+    // xdg-open and gio must come before the direct file-manager tier so a
+    // correctly-registered handler is preferred over an arbitrarily-picked
+    // file manager when both are available.
+    let xdg_pos = names.iter().position(|n| *n == "xdg-open").unwrap();
+    let gio_pos = names.iter().position(|n| *n == "gio").unwrap();
+    let nautilus_pos = names.iter().position(|n| *n == "nautilus").unwrap();
+    assert!(
+        xdg_pos < nautilus_pos && gio_pos < nautilus_pos,
+        "xdg-open/gio must precede direct file managers, got {names:?}"
+    );
 }
