@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { openWorkspacePath } from "../lib/commands";
 import { projectUpdateDetail, projectUpdateTitle, statusLabel } from "../lib/format";
-import { EmptyState, PanelHeader, errorMessage } from "../lib/shared";
+import { openWorkspacePathWithCopyFallback } from "../lib/openPathFallback";
+import { EmptyState, PanelHeader } from "../lib/shared";
 import type { GitStatus, Project, TaskRecord } from "../lib/types";
 
 type ProjectErrorLink = {
@@ -99,12 +99,13 @@ export function ProjectsView({
 
   const openProjectPath = (project: Project) =>
     runRowAction(async () => {
-      try {
-        await openWorkspacePath(workspaceRoot, project.path);
-        setMessage(`Opening ${project.name}.`);
-      } catch (error) {
-        setMessage(errorMessage(error));
-      }
+      setMessage(
+        await openWorkspacePathWithCopyFallback({
+          label: project.name,
+          path: project.path,
+          workspaceRoot,
+        }),
+      );
     });
 
   const toggleProjectHidden = (project: Project) =>

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   linkSkill,
   linkSkillsBatch,
-  openWorkspacePath,
   previewLinkSkill,
   previewLinkSkillsBatch,
   previewUnlinkSkill,
@@ -10,6 +9,7 @@ import {
   unlinkSkill,
 } from "../lib/commands";
 import { renderMarkdown } from "../lib/format";
+import { copyTextWithFallback, openWorkspacePathWithCopyFallback } from "../lib/openPathFallback";
 import { EmptyState, PanelHeader, errorMessage } from "../lib/shared";
 import type {
   AgentProfileState,
@@ -249,10 +249,13 @@ export function SkillsView({
     detailActionBusyRef.current = true;
     setDetailActionBusy(true);
     try {
-      await openWorkspacePath(workspace.root, path);
-      setDetailMessage(`Opening ${label}.`);
-    } catch (error) {
-      setDetailMessage(errorMessage(error));
+      setDetailMessage(
+        await openWorkspacePathWithCopyFallback({
+          label,
+          path,
+          workspaceRoot: workspace.root,
+        }),
+      );
     } finally {
       detailActionBusyRef.current = false;
       setDetailActionBusy(false);
@@ -265,11 +268,10 @@ export function SkillsView({
     setDetailActionBusy(true);
     try {
       try {
-        await navigator.clipboard.writeText(path);
-        setDetailMessage("Path copied.");
+        const result = await copyTextWithFallback(path);
+        setDetailMessage(result === "copied" ? "Path copied." : "Copy path fallback opened.");
       } catch {
-        window.prompt("Copy path", path);
-        setDetailMessage("Copy path fallback opened.");
+        setDetailMessage("Clipboard is unavailable.");
       }
     } finally {
       detailActionBusyRef.current = false;
@@ -434,7 +436,7 @@ export function SkillsView({
                 onClick={() => openPath(selectedSkill.absolutePath, "skill path")}
                 type="button"
               >
-                📂 Open
+                Open folder
               </button>
               <button
                 className="secondary-button"
@@ -450,7 +452,7 @@ export function SkillsView({
                 onClick={previewSkillMarkdown}
                 type="button"
               >
-                👁 Preview
+                Preview
               </button>
             </div>
             <div className="single-action-grid">

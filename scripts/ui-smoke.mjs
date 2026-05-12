@@ -146,6 +146,8 @@ try {
   );
   const { applyThemePreference, mergeTaskRecords, preserveLogs } =
     await server.ssrLoadModule("/src/lib/shared.tsx");
+  const { openWorkspacePathWithCopyFallback } =
+    await server.ssrLoadModule("/src/lib/openPathFallback.ts");
   const { restoreRecentWorkspace, selectWorkspace } =
     await server.ssrLoadModule("/src/lib/commands.ts");
 
@@ -167,6 +169,22 @@ try {
   applyThemePreference("system", themeRoot);
   assert.equal(themeRoot.dataset.theme, undefined);
   assert.equal(themeRoot.style.colorScheme, "");
+
+  assert.equal(
+    await openWorkspacePathWithCopyFallback({
+      copyText: async (text) => {
+        assert.equal(text, "/tmp/skilldock-smoke/project-one");
+        return "copied";
+      },
+      label: "Project One",
+      openPath: async () => {
+        throw new Error("No working file opener on this system.");
+      },
+      path: "/tmp/skilldock-smoke/project-one",
+      workspaceRoot: workspace.root,
+    }),
+    "Could not open Project One; path copied instead. No working file opener on this system.",
+  );
 
   const app = render(React.createElement(App));
   assertContains(app, 'src="/app-icon.png"', "app shell brand icon");
