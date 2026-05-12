@@ -212,24 +212,24 @@ export function cancelTask(taskId: string): Promise<TaskRecord | null> {
 }
 
 // Desktop window chrome helpers. No-ops when running via Vite without the Tauri bridge
-// so `npm run ui:smoke` and SSR paths don't fail. Errors are swallowed because title/theme
-// cosmetics must not block the app boot or theme switch flow.
-export async function setWindowTitle(title: string): Promise<void> {
+// so `npm run ui:smoke` and SSR paths don't fail. Errors are swallowed because window
+// cosmetics must not block the app boot or normal UI flows.
+async function withCurrentWindow(
+  action: (window: Awaited<ReturnType<typeof getWindow>>) => Promise<void>,
+) {
   if (!hasTauriBridge()) return;
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().setTitle(title);
+    await action(await getWindow());
   } catch {
-    // Non-fatal: older Tauri runtime or webview rejection should not surface here.
+    // Non-fatal: older runtimes, web-only smoke runs, and unsupported platforms should not surface here.
   }
 }
 
+async function getWindow() {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  return getCurrentWindow();
+}
+
 export async function setWindowTheme(theme: "light" | "dark" | null): Promise<void> {
-  if (!hasTauriBridge()) return;
-  try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().setTheme(theme);
-  } catch {
-    // setTheme is only implemented on Windows and macOS 10.14+; ignore on other platforms.
-  }
+  await withCurrentWindow((window) => window.setTheme(theme));
 }

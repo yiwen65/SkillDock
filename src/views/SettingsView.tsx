@@ -6,7 +6,7 @@ import {
   scanWorkspace,
   selectWorkspace,
 } from "../lib/commands";
-import { PanelHeader, errorMessage, type ThemePreference } from "../lib/shared";
+import { PanelHeader, errorMessage } from "../lib/shared";
 import type { AgentProfile, UserConfig, Workspace } from "../lib/types";
 
 function clampAutomaticCheckInterval(value: number) {
@@ -76,16 +76,14 @@ function validateProfileDrafts(profiles: AgentProfile[]) {
 }
 
 export function SettingsView({
-  onThemePreferenceChange,
   onWorkspaceChange,
   workspace,
 }: {
-  onThemePreferenceChange: (theme: ThemePreference) => void;
   onWorkspaceChange: (workspace: Workspace, message: string) => void;
   workspace: Workspace;
 }) {
   const [config, setConfig] = useState<UserConfig | null>(null);
-  const [workspaceDraft, setWorkspaceDraft] = useState(workspace.root);
+  const [workspaceDraft, setWorkspaceDraft] = useState("");
   const [profileDrafts, setProfileDrafts] = useState<AgentProfile[]>(
     workspace.agentProfiles.map((state) => state.profile),
   );
@@ -104,7 +102,6 @@ export function SettingsView({
         if (cancelled) return;
         setConfig(loaded);
         setProfileDrafts(loaded.agentProfiles);
-        onThemePreferenceChange(loaded.uiPreferences.theme);
         setMessage(null);
       })
       .catch((error) => {
@@ -116,7 +113,7 @@ export function SettingsView({
   }, []);
 
   useEffect(() => {
-    setWorkspaceDraft(workspace.root);
+    setWorkspaceDraft("");
   }, [workspace.root]);
 
   const updateConfig = (update: (current: UserConfig) => UserConfig) => {
@@ -141,7 +138,6 @@ export function SettingsView({
     try {
       const saved = await patchUserPreferences(patch);
       setConfig(saved);
-      onThemePreferenceChange(saved.uiPreferences.theme);
       setMessage("Settings saved.");
     } catch (error) {
       setMessage(errorMessage(error));
@@ -165,8 +161,7 @@ export function SettingsView({
       const nextWorkspace = await selectWorkspace(nextPath);
       const saved = await loadUserConfig();
       setConfig(saved);
-      onThemePreferenceChange(saved.uiPreferences.theme);
-      setWorkspaceDraft(nextWorkspace.root);
+      setWorkspaceDraft("");
       onWorkspaceChange(nextWorkspace, "Workspace changed.");
     } catch (error) {
       setMessage(errorMessage(error));
@@ -214,33 +209,18 @@ export function SettingsView({
 
   const addProfile = () => {
     setProfileDrafts((profiles) => {
-      let suffix = profiles.length + 1;
-      const existingIds = new Set(profiles.map((p) => p.id));
-      let id = `custom-agent-${suffix}`;
-      while (existingIds.has(id)) {
-        suffix += 1;
-        id = `custom-agent-${suffix}`;
-      }
       return [
         ...profiles,
         {
-          id,
-          name: `Custom Agent ${suffix}`,
-          skillsDir: `~/skills/${id}`,
+          id: "",
+          name: "",
+          skillsDir: "",
           enabled: true,
           builtIn: false,
           linkMode: "symlink" as const,
         },
       ];
     });
-  };
-
-  const updateThemePreference = (theme: ThemePreference) => {
-    onThemePreferenceChange(theme);
-    updateConfig((current) => ({
-      ...current,
-      uiPreferences: { ...current.uiPreferences, theme },
-    }));
   };
 
   if (!config) {
@@ -262,7 +242,7 @@ export function SettingsView({
             <input
               onChange={(event) => setWorkspaceDraft(event.target.value)}
               value={workspaceDraft}
-              placeholder="/path/to/workspace"
+              placeholder="copy skills repo path, example: /home/usr/Skills-repo"
             />
           </label>
           <button
@@ -271,7 +251,7 @@ export function SettingsView({
             onClick={() => switchWorkspace(workspaceDraft)}
             type="button"
           >
-            Open
+            Add
           </button>
         </div>
         {config.recentWorkspaces.length > 0 && (
@@ -295,17 +275,6 @@ export function SettingsView({
       <section className="data-panel compact-form settings-grid">
         <PanelHeader title="Preferences" detail="" />
         <div className="settings-form-grid">
-          <label>
-            <span>Theme</span>
-            <select
-              onChange={(event) => updateThemePreference(event.target.value as ThemePreference)}
-              value={config.uiPreferences.theme}
-            >
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </label>
           <label>
             <span>Project sort</span>
             <select
@@ -425,6 +394,7 @@ export function SettingsView({
                   onChange={(event) =>
                     updateProfile(index, (item) => ({ ...item, id: event.target.value }))
                   }
+                  placeholder="custom-agent"
                   value={profile.id}
                 />
               </label>
@@ -434,6 +404,7 @@ export function SettingsView({
                   onChange={(event) =>
                     updateProfile(index, (item) => ({ ...item, name: event.target.value }))
                   }
+                  placeholder="Custom Agent"
                   value={profile.name}
                 />
               </label>
@@ -443,6 +414,7 @@ export function SettingsView({
                   onChange={(event) =>
                     updateProfile(index, (item) => ({ ...item, skillsDir: event.target.value }))
                   }
+                  placeholder="~/.agent_name/skills"
                   value={profile.skillsDir}
                 />
               </label>
