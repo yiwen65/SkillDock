@@ -36,6 +36,6 @@ Use `npm run ui:smoke` for broad frontend regression coverage. Add assertions wh
 
 ## Commit & Pull Request Guidelines
 
-The current branch has no commit history, so no repository-specific convention is established yet. Use concise imperative messages, for example `Add workspace scan tests` or `Fix link preview state`.
+The full workflow — branch prefixes, Conventional Commits, required CI checks, rebase-merge, and the release procedure — lives in [`CONTRIBUTING.md`](CONTRIBUTING.md) (or [`CONTRIBUTING.zh-CN.md`](CONTRIBUTING.zh-CN.md)). Follow it rather than inventing new conventions; it matches the repo's branch-protection configuration.
 
-PRs should include a short summary, test results, linked issue or task when available, and screenshots or recordings for visible UI changes. Note any Tauri, filesystem, or platform-specific behavior reviewers should verify.
+Short version: branch off `main`, run the local gates before pushing, open a PR, wait for all four CI checks to go green, then `gh pr merge <n> --rebase --delete-branch`.
