@@ -84,6 +84,13 @@ pub fn select_workspace_at(
     save_user_config_at(user_config_path.as_ref(), &user_config)
         .map_err(WorkspaceError::config)?;
 
+    // Also persist to the independent workspace registry so a reinstall can
+    // recover even if user config is wiped.
+    crate::register_workspace_at(
+        crate::default_workspace_registry_path(),
+        &canonical_root.display().to_string(),
+    );
+
     crate::scan_workspace_at(&canonical_root, &user_config.agent_profiles)
 }
 
@@ -93,10 +100,22 @@ pub fn restore_recent_workspace_at(
     let user_config = load_user_config_at(user_config_path.as_ref())
         .map_err(WorkspaceError::config)?;
 
-    for workspace_root in user_config.recent_workspaces {
-        let path = PathBuf::from(&workspace_root);
+    for workspace_root in &user_config.recent_workspaces {
+        let path = PathBuf::from(workspace_root);
         if path.is_dir() {
             return select_workspace_at(path, user_config_path).map(Some);
+        }
+    }
+
+    // Fallback: user config may have been wiped by an uninstall/reinstall.
+    // Try the independent workspace registry.
+    if user_config.recent_workspaces.is_empty() {
+        let registry = crate::load_workspace_registry_at(crate::default_workspace_registry_path());
+        for workspace_root in registry {
+            let path = PathBuf::from(&workspace_root);
+            if path.is_dir() {
+                return select_workspace_at(path, user_config_path).map(Some);
+            }
         }
     }
 

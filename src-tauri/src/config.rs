@@ -426,3 +426,93 @@ fn temporary_path_for(path: &Path) -> PathBuf {
         unique
     ))
 }
+
+// --- Workspace registry ---
+// A lightweight file stored separately from user config so that even if the
+// main config is deleted during an uninstall/reinstall cycle, the app can
+// still discover previously-used workspaces.
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRegistry {
+    pub workspaces: Vec<String>,
+}
+
+pub fn default_workspace_registry_path() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("SkillDock")
+                .join("workspaces.json");
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+            return PathBuf::from(data_home)
+                .join("skilldock")
+                .join("workspaces.json");
+        }
+
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("skilldock")
+                .join("workspaces.json");
+        }
+    }
+
+    PathBuf::from("skilldock-workspaces.json")
+}
+
+pub fn load_workspace_registry_at(path: impl AsRef<Path>) -> Vec<String> {
+    let path = path.as_ref();
+    let contents = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str::<WorkspaceRegistry>(&contents)
+        .map(|r| r.workspaces)
+        .unwrap_or_default()
+}
+
+pub fn save_workspace_registry_at(path: impl AsRef<Path>, workspaces: &[String]) {
+    let path = path.as_ref();
+    let registry = WorkspaceRegistry {
+        workspaces: workspaces.to_vec(),
+    };
+    // Best-effort; failure here is non-fatal.
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&registry) {
+        let tmp = temporary_path_for(path);
+        let ok = (|| -> io::Result<()> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)?;
+            file.write_all(&bytes)?;
+            file.write_all(b"\n")?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&tmp, path)?;
+            Ok(())
+        })();
+        if ok.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+    }
+}
+
+pub fn register_workspace_at(registry_path: impl AsRef<Path>, workspace_root: &str) {
+    let mut workspaces = load_workspace_registry_at(registry_path.as_ref());
+    workspaces.retain(|w| w != workspace_root);
+    workspaces.insert(0, workspace_root.to_string());
+    save_workspace_registry_at(registry_path.as_ref(), &workspaces);
+}
