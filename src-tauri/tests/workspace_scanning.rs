@@ -620,6 +620,18 @@ fn spawn_first_available_opener_falls_back_past_missing_programs() {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 #[test]
+fn spawn_first_available_opener_falls_back_past_nonzero_exit() {
+    // Simulates the real-world symptom where `xdg-open` spawns cleanly but
+    // then exits non-zero because no desktop environment / handler is
+    // registered. The fallback must treat that as a failure and try the
+    // next candidate instead of reporting false success.
+    let path = temp_dir("opener_nonzero_fallback");
+    let candidates: &[(&str, &[&str])] = &[("false", &[]), ("true", &[])];
+    skilldock_lib::spawn_first_available_opener(&path, candidates).unwrap();
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
 fn spawn_first_available_opener_reports_last_error_when_all_fail() {
     let path = temp_dir("opener_fallback_err");
     let candidates: &[(&str, &[&str])] = &[
@@ -638,6 +650,29 @@ fn spawn_first_available_opener_reports_last_error_when_all_fail() {
     assert!(
         error.message.contains("skilldock-missing-opener-beta"),
         "error message should list last candidate, got: {}",
+        error.message
+    );
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn spawn_first_available_opener_aggregates_nonzero_exit_in_error() {
+    // When every candidate runs but each exits non-zero (as `xdg-open`
+    // does on a headless system), the aggregated error should still name
+    // every program that was tried so the user knows the full story.
+    let path = temp_dir("opener_all_nonzero");
+    let candidates: &[(&str, &[&str])] = &[("false", &[]), ("false", &["--unused"])];
+    let error = skilldock_lib::spawn_first_available_opener(&path, candidates).unwrap_err();
+    assert_eq!(error.kind, skilldock_lib::WorkspaceErrorKind::Io);
+    assert!(
+        error.message.contains("false"),
+        "error should name the failing program, got: {}",
+        error.message
+    );
+    // A non-zero exit must not be mis-reported as "failed to spawn".
+    assert!(
+        !error.message.contains("failed to spawn"),
+        "non-zero exit should not be phrased as a spawn failure, got: {}",
         error.message
     );
 }
