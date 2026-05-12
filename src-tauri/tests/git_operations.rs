@@ -173,6 +173,32 @@ fn import_project_clones_local_repo_and_returns_refreshed_workspace() {
 }
 
 #[test]
+fn import_project_retries_failed_clone_and_does_not_add_partial_project() {
+    let workspace = temp_dir("import_failed_clone");
+
+    let result = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: workspace.join("missing-source.git").display().to_string(),
+            directory_name: Some("failed-import".to_string()),
+            shallow: false,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Failed);
+    assert!(result.task.stdout.contains("clone attempt 1/3"));
+    assert!(result.task.stdout.contains("clone attempt 3/3"));
+    assert!(!workspace.join("failed-import").exists());
+    assert!(!result
+        .workspace
+        .projects
+        .iter()
+        .any(|project| project.id == "failed-import"));
+}
+
+#[test]
 fn import_project_adopts_existing_git_directory_and_blocks_plain_directory() {
     let workspace = temp_dir("import_existing");
     let existing_git = workspace.join("existing");
