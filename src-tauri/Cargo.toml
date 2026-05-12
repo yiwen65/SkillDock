@@ -1,6 +1,6 @@
 [package]
 name = "skilldock"
-version = "0.1.0"
+version = "0.2.0"
 description = "Desktop manager for a local SkillDock workspace"
 edition = "2021"
 # PolyForm Noncommercial 1.0.0 is not on SPDX's standard list, so use
