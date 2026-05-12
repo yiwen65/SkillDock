@@ -255,49 +255,82 @@ fn spawn_opener(path: &Path) -> Result<(), WorkspaceError> {
         if let Ok(windows_path) = wsl_windows_path(path) {
             let mut command = std::process::Command::new("cmd.exe");
             command.args(["/C", "start", "", &windows_path]);
-            if command.spawn().is_ok() {
-                return Ok(());
+            command.stdin(std::process::Stdio::null());
+            command.stdout(std::process::Stdio::piped());
+            command.stderr(std::process::Stdio::piped());
+            if let Ok(output) = command.output() {
+                if output.status.success() {
+                    return Ok(());
+                }
             }
-            // cmd.exe spawn failed (rare inside WSL); fall through to the
-            // native Linux opener chain below.
+            // cmd.exe either failed to spawn or exited non-zero; fall
+            // through to the native Linux opener chain below so that a
+            // broken WSL interop setup still leaves a chance of opening
+            // the path on the Linux side.
         }
     }
     spawn_first_available_opener(path, LINUX_PATH_OPENERS)
 }
 
-/// Spawn the first candidate opener that successfully `spawn`s. Returns the
-/// last error if every candidate fails. Exposed (rather than kept private) so
-/// integration tests can exercise the fallback chain with synthetic
-/// candidates.
+/// Run the first candidate opener that both spawns *and* exits with a
+/// success status, returning `Ok(())` on the first win. Openers like
+/// `xdg-open` may spawn cleanly and then fail internally — for example, on
+/// a headless Linux system with no desktop environment they cycle through
+/// every browser they know about, print "... not found" to stderr, and
+/// exit non-zero. A `spawn`-only check would treat that as success and
+/// leave the user with a silently broken "Open" button.
+///
+/// Stdin is nulled and stdout/stderr are captured so xdg-open's chatty
+/// fallback output does not leak into the terminal the app was launched
+/// from; the captured stderr is folded into the aggregated error message
+/// when every candidate fails so users can see *why* each one failed.
+///
+/// Exposed (rather than kept private) so integration tests can exercise
+/// the fallback chain with synthetic candidates.
 #[cfg(all(unix, not(target_os = "macos")))]
 pub fn spawn_first_available_opener(
     path: &Path,
     candidates: &[(&str, &[&str])],
 ) -> Result<(), WorkspaceError> {
-    let mut last_error: Option<(String, String)> = None;
+    let mut attempts: Vec<String> = Vec::new();
     for (program, prefix_args) in candidates {
         let mut command = std::process::Command::new(program);
         command.args(*prefix_args);
         command.arg(path);
-        match command.spawn() {
-            Ok(_) => return Ok(()),
+        command.stdin(std::process::Stdio::null());
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+        match command.output() {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                let status = output
+                    .status
+                    .code()
+                    .map(|code| format!("status {code}"))
+                    .unwrap_or_else(|| "signal".to_string());
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stderr = stderr.trim();
+                if stderr.is_empty() {
+                    attempts.push(format!("{program} exited with {status}"));
+                } else {
+                    let truncated: String = stderr.chars().take(240).collect();
+                    attempts.push(format!("{program} ({status}): {truncated}"));
+                }
+            }
             Err(err) => {
-                last_error = Some(((*program).to_string(), err.to_string()));
+                attempts.push(format!("{program} failed to spawn: {err}"));
             }
         }
     }
-    let tried = candidates
-        .iter()
-        .map(|(program, _)| *program)
-        .collect::<Vec<_>>()
-        .join(", ");
-    let message = match last_error {
-        Some((program, err)) => format!(
-            "No working file opener on PATH. Tried: {tried}. \
-             Last error from '{program}': {err}. \
-             Install xdg-utils, gio (glib), or a desktop-specific opener."
-        ),
-        None => "No openers configured for this platform.".to_string(),
+    let message = if attempts.is_empty() {
+        "No openers configured for this platform.".to_string()
+    } else {
+        format!(
+            "No working file opener on this system. Tried: {}. \
+             Install a desktop environment, a GUI file manager, \
+             or xdg-utils / gio.",
+            attempts.join(" | "),
+        )
     };
     Err(WorkspaceError::io(path, message))
 }
