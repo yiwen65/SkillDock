@@ -81,23 +81,11 @@ function validateProfileDrafts(profiles: AgentProfile[]) {
   return null;
 }
 
-function emptyCustomProfile(existingProfiles: AgentProfile[]): AgentProfile {
-  let suffix = existingProfiles.length + 1;
-  const existingIds = new Set(existingProfiles.map((profile) => profile.id));
-  const existingSkillsDirs = new Set(
-    existingProfiles.map((profile) => normalizeProfilePathForCompare(profile.skillsDir)),
-  );
-  let id = `custom-agent-${suffix}`;
-  let skillsDir = `~/skills/${id}`;
-  while (existingIds.has(id) || existingSkillsDirs.has(normalizeProfilePathForCompare(skillsDir))) {
-    suffix += 1;
-    id = `custom-agent-${suffix}`;
-    skillsDir = `~/skills/${id}`;
-  }
+function emptyCustomProfile(): AgentProfile {
   return {
-    id,
-    name: `Custom Agent ${suffix}`,
-    skillsDir,
+    id: "",
+    name: "",
+    skillsDir: "",
     enabled: true,
     builtIn: false,
     linkMode: "symlink",
@@ -120,9 +108,7 @@ export function AgentsView({
     profiles.map((state) => state.profile),
   );
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formProfile, setFormProfile] = useState<AgentProfile>(() =>
-    emptyCustomProfile(draftProfiles),
-  );
+  const [formProfile, setFormProfile] = useState<AgentProfile>(() => emptyCustomProfile());
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [agentsBusy, setAgentsBusy] = useState(false);
   const agentsBusyRef = useRef(false);
@@ -131,7 +117,7 @@ export function AgentsView({
     const nextProfiles = profiles.map((state) => state.profile);
     setDraftProfiles(nextProfiles);
     setEditingId(null);
-    setFormProfile(emptyCustomProfile(nextProfiles));
+    setFormProfile(emptyCustomProfile());
     setProfileMessage(null);
   }, [profiles, workspace.root]);
 
@@ -160,7 +146,7 @@ export function AgentsView({
   const startAddProfile = () => {
     if (agentsBusyRef.current) return;
     setEditingId(null);
-    setFormProfile(emptyCustomProfile(draftProfiles));
+    setFormProfile(emptyCustomProfile());
     setProfileMessage(null);
   };
 
@@ -186,7 +172,7 @@ export function AgentsView({
       const nextWorkspace = await scanWorkspace(workspace.root);
       setDraftProfiles(nextProfiles);
       setEditingId(null);
-      setFormProfile(emptyCustomProfile(nextProfiles));
+      setFormProfile(emptyCustomProfile());
       setProfileMessage(message);
       onWorkspaceChange(nextWorkspace, message);
     } catch (error) {
@@ -366,7 +352,7 @@ export function AgentsView({
               disabled={Boolean(editingId) || agentsBusy}
               readOnly={agentsBusy}
               onChange={(event) => setFormProfile({ ...formProfile, id: event.target.value })}
-              placeholder="my-agent"
+              placeholder="custom-agent"
               value={formProfile.id}
             />
           </label>
@@ -374,7 +360,7 @@ export function AgentsView({
             <span>Name</span>
             <input
               onChange={(event) => setFormProfile({ ...formProfile, name: event.target.value })}
-              placeholder="My Agent"
+              placeholder="Custom Agent"
               value={formProfile.name}
               readOnly={agentsBusy}
             />
@@ -385,7 +371,7 @@ export function AgentsView({
               onChange={(event) =>
                 setFormProfile({ ...formProfile, skillsDir: event.target.value })
               }
-              placeholder="~/.my-agent/skills"
+              placeholder="~/.agent_name/skills"
               value={formProfile.skillsDir}
               readOnly={agentsBusy}
             />
