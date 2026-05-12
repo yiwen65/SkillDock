@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { projectUpdateDetail, projectUpdateTitle, statusLabel } from "../lib/format";
+import { projectUpdateDetail, projectUpdateTitle } from "../lib/format";
 import { openWorkspacePathWithCopyFallback } from "../lib/openPathFallback";
 import { EmptyState, PanelHeader } from "../lib/shared";
 import type { GitStatus, Project, TaskRecord } from "../lib/types";
@@ -9,20 +9,35 @@ type ProjectErrorLink = {
   outcome: { projectId: string; status: string; summary: string; error?: string };
 };
 
-// All possible git statuses, ordered so the filter always shows a stable, complete
-// set of options. Keeping every status visible ensures changing the filter is a
-// meaningful UI update even when the workspace only contains a single status.
-const ALL_GIT_STATUSES: readonly GitStatus[] = [
-  "up_to_date",
-  "behind",
-  "ahead",
-  "diverged",
-  "dirty",
-  "no_upstream",
-  "detached",
-  "fetch_failed",
-  "unknown",
+type ProjectStatusFilter =
+  | "all"
+  | "up_to_date"
+  | "updates_available"
+  | "local_changes"
+  | "attention";
+
+type ProjectStatusGroup = Exclude<ProjectStatusFilter, "all">;
+
+const PROJECT_STATUS_GROUPS: readonly { value: ProjectStatusGroup; label: string }[] = [
+  { value: "up_to_date", label: "Up to date" },
+  { value: "updates_available", label: "Updates available" },
+  { value: "local_changes", label: "Local changes" },
+  { value: "attention", label: "Needs attention" },
 ];
+
+function projectStatusGroup(status: GitStatus): ProjectStatusGroup {
+  switch (status) {
+    case "up_to_date":
+      return "up_to_date";
+    case "behind":
+      return "updates_available";
+    case "ahead":
+    case "dirty":
+      return "local_changes";
+    default:
+      return "attention";
+  }
+}
 
 export function buildLatestProjectErrorIndex(tasks: TaskRecord[], workspaceRoot: string) {
   const errors = new Map<string, ProjectErrorLink>();
@@ -71,7 +86,7 @@ export function ProjectsView({
   const [autostash, setAutostash] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [hiddenFilter, setHiddenFilter] = useState<"visible" | "all" | "hidden">("visible");
-  const [statusFilter, setStatusFilter] = useState<"all" | Project["gitStatus"]>("all");
+  const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   // Ref guard so rapid clicks on per-row async buttons (open / hide / log) do
@@ -123,7 +138,9 @@ export function ProjectsView({
     return projects.filter((project) => {
       if (hiddenFilter === "visible" && project.hidden) return false;
       if (hiddenFilter === "hidden" && !project.hidden) return false;
-      if (statusFilter !== "all" && project.gitStatus !== statusFilter) return false;
+      if (statusFilter !== "all" && projectStatusGroup(project.gitStatus) !== statusFilter) {
+        return false;
+      }
       if (!normalizedQuery) return true;
       return [project.name, project.id, project.remoteUrl, project.branch, project.upstream]
         .filter(Boolean)
@@ -131,37 +148,24 @@ export function ProjectsView({
     });
   }, [hiddenFilter, projects, query, statusFilter]);
 
-  // Count how many projects fall into each git status so the dropdown can show
-  // a per-option count and the user sees the filter's discriminating power.
-  // The counts intentionally ignore the current `hiddenFilter` / `query` so
-  // switching status always reflects the real distribution of the workspace.
+  // Count by user-facing status groups instead of raw Git states; raw states
+  // such as detached, no upstream, and fetch failed all need the same action.
   const statusCounts = useMemo(() => {
-    const counts = new Map<GitStatus, number>();
+    const counts = new Map<ProjectStatusGroup, number>();
     for (const project of projects) {
-      counts.set(project.gitStatus, (counts.get(project.gitStatus) ?? 0) + 1);
+      const group = projectStatusGroup(project.gitStatus);
+      counts.set(group, (counts.get(group) ?? 0) + 1);
     }
     return counts;
   }, [projects]);
 
-  // Always expose every git status in the dropdown (sorted by known order),
-  // even statuses with zero matches. This guarantees switching between
-  // options produces a visible list change, fixing the "nothing happens"
-  // feeling when every project currently shares a single status.
-  const statusOptions = useMemo<GitStatus[]>(() => {
-    const extras = Array.from(statusCounts.keys()).filter(
-      (status) => !ALL_GIT_STATUSES.includes(status),
-    );
-    return [...ALL_GIT_STATUSES, ...extras.sort()];
+  const statusOptions = useMemo(() => {
+    return PROJECT_STATUS_GROUPS.filter((option) => (statusCounts.get(option.value) ?? 0) > 0);
   }, [statusCounts]);
 
-  // Defensive: if the selected status is neither part of the canonical list
-  // nor present in the current workspace, fall back to "all" so the select
-  // never shows an invalid value. Zero-count canonical statuses stay valid —
-  // that is exactly the scenario that makes the filter give visible feedback.
   useEffect(() => {
     if (statusFilter === "all") return;
-    const isCanonical = (ALL_GIT_STATUSES as readonly string[]).includes(statusFilter);
-    if (!isCanonical && !statusCounts.has(statusFilter)) {
+    if (!statusCounts.has(statusFilter)) {
       setStatusFilter("all");
     }
   }, [statusFilter, statusCounts]);
@@ -289,15 +293,13 @@ export function ProjectsView({
           <label>
             <span>Status</span>
             <select
-              onChange={(event) =>
-                setStatusFilter(event.target.value as "all" | Project["gitStatus"])
-              }
+              onChange={(event) => setStatusFilter(event.target.value as ProjectStatusFilter)}
               value={statusFilter}
             >
               <option value="all">All statuses ({projects.length})</option>
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {statusLabel(status)} ({statusCounts.get(status) ?? 0})
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label} ({statusCounts.get(option.value) ?? 0})
                 </option>
               ))}
             </select>

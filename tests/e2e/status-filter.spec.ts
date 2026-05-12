@@ -91,12 +91,12 @@ test("Status filter updates the project list immediately", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Behind Project" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Up To Date Project" })).toBeVisible();
 
-  // Select "behind" status
-  await page.getByLabel("Status").selectOption("behind");
+  // Select the grouped status for projects that can be updated.
+  await page.getByLabel("Status").selectOption("updates_available");
   await expect(page.getByRole("heading", { name: "Behind Project" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Up To Date Project" })).toBeHidden();
 
-  // Select "up_to_date" status
+  // Select the grouped status for current projects.
   await page.getByLabel("Status").selectOption("up_to_date");
   await expect(page.getByRole("heading", { name: "Up To Date Project" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Behind Project" })).toBeHidden();
@@ -114,7 +114,7 @@ test("Status dropdown keeps selection visible after change", async ({ page }) =>
   await expect(page.getByLabel("Status")).toHaveValue("up_to_date");
 });
 
-test("Status dropdown always lists every git status with per-status counts", async ({ page }) => {
+test("Status dropdown lists only key status groups with matches", async ({ page }) => {
   await openMockWithTwoStatuses(page);
 
   const statusSelect = page.getByLabel("Status");
@@ -123,23 +123,12 @@ test("Status dropdown always lists every git status with per-status counts", asy
   );
 
   expect(trimmed).toEqual(
-    expect.arrayContaining([
-      "All statuses (2)",
-      "up to date (1)",
-      "behind (1)",
-      "ahead (0)",
-      "diverged (0)",
-      "dirty (0)",
-      "no upstream (0)",
-      "detached (0)",
-      "fetch failed (0)",
-      "unknown (0)",
-    ]),
+    expect.arrayContaining(["All statuses (2)", "Up to date (1)", "Updates available (1)"]),
   );
+  expect(trimmed).not.toContain("Local changes (0)");
+  expect(trimmed).not.toContain("Needs attention (0)");
 
-  // Selecting a zero-count status must empty the list — visible feedback.
-  await statusSelect.selectOption("dirty");
-  await expect(page.getByRole("heading", { name: "No matching projects" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Behind Project" })).toBeHidden();
+  await statusSelect.selectOption("updates_available");
+  await expect(page.getByRole("heading", { name: "Behind Project" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Up To Date Project" })).toBeHidden();
 });
