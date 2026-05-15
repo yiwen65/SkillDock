@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { memo, useEffect, useRef, useState } from "react";
 import { cancelTask, getTaskLogs, getTaskStatus } from "../lib/commands";
 import { EmptyState, PanelHeader, errorMessage, preserveLogs } from "../lib/shared";
 import type { TaskRecord } from "../lib/types";
@@ -34,7 +34,7 @@ function LogBlock({ label, log }: { label: string; log: BoundedLog }) {
   );
 }
 
-export function TasksView({
+export const TasksView = memo(function TasksView({
   focusedTaskId,
   onTaskChange,
   tasks,
@@ -125,7 +125,7 @@ export function TasksView({
       </div>
     </section>
   );
-}
+});
 
 const TaskLogRow = React.memo(function TaskLogRow({
   focused,

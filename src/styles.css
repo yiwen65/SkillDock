@@ -1303,6 +1303,24 @@ textarea::placeholder {
   gap: 8px;
 }
 
+.virtual-list {
+  display: block;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.virtual-list-spacer {
+  position: relative;
+  min-height: 100%;
+}
+
+.virtual-list-item {
+  position: absolute;
+  right: 0;
+  left: 0;
+  will-change: transform;
+}
+
 .list-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1336,6 +1354,11 @@ textarea::placeholder {
 .project-row {
   grid-template-columns: minmax(280px, 1fr) minmax(280px, auto) auto;
   align-items: center;
+}
+
+.project-list {
+  height: calc(100vh - 360px);
+  min-height: 320px;
 }
 
 .project-summary {

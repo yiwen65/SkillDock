@@ -11,6 +11,7 @@ import {
 import { renderMarkdown } from "../lib/format";
 import { copyTextWithFallback, openWorkspacePathWithCopyFallback } from "../lib/openPathFallback";
 import { EmptyState, PanelHeader, errorMessage } from "../lib/shared";
+import { VirtualList } from "../lib/VirtualList";
 import type {
   AgentProfileState,
   BatchLinkOperationResult,
@@ -44,7 +45,7 @@ function profileName(profiles: AgentProfileState[], profileId: string) {
   return profiles.find((state) => state.profile.id === profileId)?.profile.name || profileId;
 }
 
-export function SkillsView({
+export const SkillsView = memo(function SkillsView({
   onBatchLinkResult,
   onOperationResult,
   workspace,
@@ -401,8 +402,13 @@ export function SkillsView({
             </select>
           </label>
         </div>
-        <div className="table-list skill-list">
-          {filteredSkills.map((skill) => {
+        <VirtualList
+          className="table-list skill-list"
+          empty={<p className="batch-message">No skills match the current filters.</p>}
+          estimateSize={92}
+          itemKey={(skill) => skill.id}
+          items={filteredSkills}
+          renderItem={(skill) => {
             const project = projectById.get(skill.sourceProjectId);
             return (
               <SkillRow
@@ -415,11 +421,8 @@ export function SkillsView({
                 skill={skill}
               />
             );
-          })}
-          {filteredSkills.length === 0 && (
-            <p className="batch-message">No skills match the current filters.</p>
-          )}
-        </div>
+          }}
+        />
       </section>
 
       <section className="data-panel skill-detail-panel">
@@ -632,7 +635,7 @@ export function SkillsView({
       )}
     </section>
   );
-}
+});
 
 const SkillRow = memo(function SkillRow({
   onSelect,

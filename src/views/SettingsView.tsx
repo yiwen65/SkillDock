@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   loadUserConfig,
   patchUserPreferences,
@@ -75,7 +75,7 @@ function validateProfileDrafts(profiles: AgentProfile[]) {
   return null;
 }
 
-export function SettingsView({
+export const SettingsView = memo(function SettingsView({
   onWorkspaceChange,
   workspace,
 }: {
@@ -276,6 +276,25 @@ export function SettingsView({
         <PanelHeader title="Preferences" detail="" />
         <div className="settings-form-grid">
           <label>
+            <span>Theme</span>
+            <select
+              onChange={(event) =>
+                updateConfig((current) => ({
+                  ...current,
+                  uiPreferences: {
+                    ...current.uiPreferences,
+                    theme: event.target.value as UserConfig["uiPreferences"]["theme"],
+                  },
+                }))
+              }
+              value={config.uiPreferences.theme}
+            >
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label>
             <span>Project sort</span>
             <select
               onChange={(event) =>
@@ -447,4 +466,4 @@ export function SettingsView({
       {message && <p className="batch-message settings-message">{message}</p>}
     </section>
   );
-}
+});

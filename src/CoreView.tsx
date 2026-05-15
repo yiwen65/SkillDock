@@ -54,13 +54,15 @@ export const CoreView = React.memo(function CoreView({
 }) {
   return (
     <>
-      {activeView === "Skills" && <WorkspaceMetrics workspace={workspace} />}
       {activeView === "Skills" && (
-        <SkillsView
-          onBatchLinkResult={onBatchLinkResult}
-          onOperationResult={onOperationResult}
-          workspace={workspace}
-        />
+        <>
+          <WorkspaceMetrics workspace={workspace} />
+          <SkillsView
+            onBatchLinkResult={onBatchLinkResult}
+            onOperationResult={onOperationResult}
+            workspace={workspace}
+          />
+        </>
       )}
       {activeView === "Projects" && (
         <ProjectsView
@@ -96,7 +98,11 @@ export const CoreView = React.memo(function CoreView({
   );
 });
 
-function WorkspaceMetrics({ workspace }: { workspace: Workspace }) {
+const WorkspaceMetrics = React.memo(function WorkspaceMetrics({
+  workspace,
+}: {
+  workspace: Workspace;
+}) {
   const installedCount = useMemo(
     () =>
       workspace.skills.reduce(
@@ -130,7 +136,7 @@ function WorkspaceMetrics({ workspace }: { workspace: Workspace }) {
       />
     </div>
   );
-}
+});
 
 function MetricIcon({ kind }: { kind: "agents" | "installs" | "projects" | "skills" }) {
   if (kind === "projects") {
