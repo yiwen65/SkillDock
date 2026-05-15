@@ -29,7 +29,11 @@ export function isTerminalTaskStatus(status: TaskRecord["status"]) {
 }
 
 export function mergeTaskRecords(incoming: TaskRecord[], existing: TaskRecord[]) {
+  if (incoming.length === 0) return existing;
+
   const records = new Map<string, TaskRecord>();
+  let changed = false;
+
   for (const task of incoming) {
     records.set(task.id, task);
   }
@@ -45,7 +49,16 @@ export function mergeTaskRecords(incoming: TaskRecord[], existing: TaskRecord[])
       records.set(task.id, task);
     }
   }
-  return Array.from(records.values()).slice(0, 100);
+
+  const merged = Array.from(records.values()).slice(0, 100);
+
+  // Return existing reference if nothing actually changed
+  if (merged.length === existing.length) {
+    changed = merged.some((task, i) => task !== existing[i]);
+    if (!changed) return existing;
+  }
+
+  return merged;
 }
 
 export function preserveLogs(current: TaskRecord, incoming: TaskRecord): TaskRecord {

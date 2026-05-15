@@ -583,7 +583,6 @@ h2 {
   border-radius: 8px;
   background: var(--color-surface);
   box-shadow: var(--shadow-panel);
-  backdrop-filter: blur(14px);
 }
 
 .metric {
@@ -834,6 +833,7 @@ h2 {
   gap: 14px;
   min-height: 78px;
   cursor: pointer;
+  contain: layout style;
 }
 
 .list-row.skill-row > div,

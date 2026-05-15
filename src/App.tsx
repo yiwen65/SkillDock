@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   checkAllProjectUpdates,
   checkProjectUpdates,
@@ -90,6 +90,8 @@ function App() {
       : loadState.status === "error"
         ? loadState.workspace
         : undefined;
+  const readyWorkspaceRef = useRef(readyWorkspace);
+  readyWorkspaceRef.current = readyWorkspace;
   const workspacePath =
     readyWorkspace && readyWorkspace.root.length > 0
       ? readyWorkspace.root
@@ -291,31 +293,31 @@ function App() {
     );
   };
 
-  const applyOperationResult = (result: TaskOperationResult) => {
+  const applyOperationResult = useCallback((result: TaskOperationResult) => {
     if (!isCurrentWorkspaceRoot(result.workspace.root)) {
       return;
     }
     setTaskHistory((tasks) => mergeTaskRecords([result.task], tasks));
     setTrackedLoadState({ status: "ready", workspace: result.workspace });
     setOperationMessage(result.task.summary);
-  };
+  }, []);
 
-  const applyWorkspaceChange = (workspace: Workspace, message: string) => {
-    if (readyWorkspace?.root !== workspace.root) {
+  const applyWorkspaceChange = useCallback((workspace: Workspace, message: string) => {
+    if (currentWorkspaceRootRef.current !== workspace.root) {
       setTaskHistory([]);
       setFocusedTaskId(null);
     }
     setTrackedLoadState({ status: "ready", workspace });
     setOperationMessage(message);
-  };
+  }, []);
 
-  const updateTaskRecord = (record: TaskRecord) => {
+  const updateTaskRecord = useCallback((record: TaskRecord) => {
     if (record.workspaceRoot && !isCurrentWorkspaceRoot(record.workspaceRoot)) {
       return;
     }
     setTaskHistory((tasks) => mergeTaskRecords([record], tasks));
     refreshWorkspaceAfterTerminalProjectTask(record);
-  };
+  }, []);
 
   const refreshWorkspaceAfterTerminalProjectTask = async (record: TaskRecord) => {
     if (
@@ -343,7 +345,7 @@ function App() {
     }
   };
 
-  const applyBatchLinkResult = (result: BatchLinkOperationResult) => {
+  const applyBatchLinkResult = useCallback((result: BatchLinkOperationResult) => {
     if (!isCurrentWorkspaceRoot(result.workspace.root)) {
       return;
     }
@@ -352,7 +354,7 @@ function App() {
     setOperationMessage(
       `Batch link: ${result.summary.linked} linked, ${result.summary.alreadyInstalled} already installed, ${result.summary.skipped} skipped, ${result.summary.failed} failed.`,
     );
-  };
+  }, []);
 
   const runWorkspaceOperation = async (
     label: string,
@@ -380,11 +382,14 @@ function App() {
     }
   };
 
-  const createMissingAgentDir = async (profile: AgentProfileState) => {
-    if (!readyWorkspace) {
+  const runWorkspaceOperationRef = useRef(runWorkspaceOperation);
+  runWorkspaceOperationRef.current = runWorkspaceOperation;
+
+  const createMissingAgentDir = useCallback(async (profile: AgentProfileState) => {
+    if (!readyWorkspaceRef.current) {
       return;
     }
-    const workspace = readyWorkspace;
+    const workspace = readyWorkspaceRef.current;
 
     const confirmed = window.confirm(
       `Create skills directory for ${profile.profile.name}?\n\n${profile.skillsDir}`,
@@ -408,13 +413,13 @@ function App() {
       setOperationMessage(errorMessage(error));
       setTrackedLoadState({ status: "error", message: errorMessage(error), workspace });
     }
-  };
+  }, []);
 
-  const setProjectHidden = async (projectId: string, hidden: boolean) => {
-    if (!readyWorkspace) {
+  const setProjectHidden = useCallback(async (projectId: string, hidden: boolean) => {
+    if (!readyWorkspaceRef.current) {
       return;
     }
-    const workspace = readyWorkspace;
+    const workspace = readyWorkspaceRef.current;
 
     setOperationMessage(`${hidden ? "Hiding" : "Showing"} ${projectId}...`);
     try {
@@ -449,12 +454,69 @@ function App() {
       setOperationMessage(errorMessage(error));
       setTrackedLoadState({ status: "error", message: errorMessage(error), workspace });
     }
-  };
+  }, []);
 
-  const deleteProjectHandler = (projectId: string) =>
-    runWorkspaceOperation(`Deleting ${projectId}`, (workspace) =>
-      deleteProject(workspace.root, projectId),
-    );
+  const deleteProjectHandler = useCallback(
+    (projectId: string) =>
+      runWorkspaceOperationRef.current(`Deleting ${projectId}`, (workspace) =>
+        deleteProject(workspace.root, projectId),
+      ),
+    [],
+  );
+
+  const handleCheckAll = useCallback(
+    () =>
+      runWorkspaceOperationRef.current("Checking updates", (workspace) =>
+        checkAllProjectUpdates(workspace.root),
+      ),
+    [],
+  );
+
+  const handleCheckProject = useCallback(
+    (projectId: string) =>
+      runWorkspaceOperationRef.current(`Checking ${projectId}`, (workspace) =>
+        checkProjectUpdates(workspace.root, projectId),
+      ),
+    [],
+  );
+
+  const handleImport = useCallback(
+    (source: string, directoryName: string, shallow: boolean) =>
+      runWorkspaceOperationRef.current("Importing repository", (workspace) =>
+        importProject(workspace.root, {
+          source,
+          directoryName: directoryName || undefined,
+          shallow,
+        }),
+      ),
+    [],
+  );
+
+  const handlePullAll = useCallback(
+    (autostash: boolean) =>
+      runWorkspaceOperationRef.current("Pulling projects", (workspace) =>
+        pullAllProjects(workspace.root, {
+          autostash,
+          safeProjectIds: workspace.projects
+            .filter((project) => project.pullAllEligible)
+            .map((project) => project.id),
+        }),
+      ),
+    [],
+  );
+
+  const handlePullProject = useCallback(
+    (projectId: string, autostash: boolean) =>
+      runWorkspaceOperationRef.current(`Pulling ${projectId}`, (workspace) =>
+        pullProject(workspace.root, { projectId, autostash }),
+      ),
+    [],
+  );
+
+  const handleOpenTaskLog = useCallback((taskId: string) => {
+    setFocusedTaskId(taskId);
+    setActiveView("Logs");
+  }, []);
 
   return (
     <main className="app-shell">
@@ -534,46 +596,14 @@ function App() {
             <Suspense fallback={null}>
               <CoreViewLazy
                 activeView={activeView}
-                onCheckAll={() =>
-                  runWorkspaceOperation("Checking updates", (workspace) =>
-                    checkAllProjectUpdates(workspace.root),
-                  )
-                }
-                onCheckProject={(projectId) =>
-                  runWorkspaceOperation(`Checking ${projectId}`, (workspace) =>
-                    checkProjectUpdates(workspace.root, projectId),
-                  )
-                }
-                onImport={(source, directoryName, shallow) =>
-                  runWorkspaceOperation("Importing repository", (workspace) =>
-                    importProject(workspace.root, {
-                      source,
-                      directoryName: directoryName || undefined,
-                      shallow,
-                    }),
-                  )
-                }
-                onPullAll={(autostash) =>
-                  runWorkspaceOperation("Pulling projects", (workspace) =>
-                    pullAllProjects(workspace.root, {
-                      autostash,
-                      safeProjectIds: workspace.projects
-                        .filter((project) => project.pullAllEligible)
-                        .map((project) => project.id),
-                    }),
-                  )
-                }
-                onPullProject={(projectId, autostash) =>
-                  runWorkspaceOperation(`Pulling ${projectId}`, (workspace) =>
-                    pullProject(workspace.root, { projectId, autostash }),
-                  )
-                }
+                onCheckAll={handleCheckAll}
+                onCheckProject={handleCheckProject}
+                onImport={handleImport}
+                onPullAll={handlePullAll}
+                onPullProject={handlePullProject}
                 focusedTaskId={focusedTaskId}
                 taskHistory={taskHistory}
-                onOpenTaskLog={(taskId) => {
-                  setFocusedTaskId(taskId);
-                  setActiveView("Logs");
-                }}
+                onOpenTaskLog={handleOpenTaskLog}
                 onCreateAgentDir={createMissingAgentDir}
                 onBatchLinkResult={applyBatchLinkResult}
                 onOperationResult={applyOperationResult}

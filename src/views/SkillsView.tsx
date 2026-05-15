@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   linkSkill,
   linkSkillsBatch,
@@ -634,7 +634,7 @@ export function SkillsView({
   );
 }
 
-function SkillRow({
+const SkillRow = memo(function SkillRow({
   onSelect,
   onToggle,
   project,
@@ -687,7 +687,7 @@ function SkillRow({
       </div>
     </article>
   );
-}
+});
 
 function SearchIcon() {
   return (

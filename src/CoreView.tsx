@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import React, { useMemo } from "react";
 import { SummaryMetric, type ViewName } from "./lib/shared";
 import type {
   AgentProfileState,
@@ -13,7 +13,7 @@ import { SettingsView } from "./views/SettingsView";
 import { SkillsView } from "./views/SkillsView";
 import { TasksView } from "./views/TasksView";
 
-export function CoreView({
+export const CoreView = React.memo(function CoreView({
   activeView,
   onCheckAll,
   onCheckProject,
@@ -94,7 +94,7 @@ export function CoreView({
       )}
     </>
   );
-}
+});
 
 function WorkspaceMetrics({ workspace }: { workspace: Workspace }) {
   const installedCount = useMemo(
