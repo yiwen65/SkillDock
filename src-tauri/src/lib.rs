@@ -32,6 +32,14 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             set_app_handle(app.handle().clone());
+            #[cfg(target_os = "linux")]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let icon = tauri::include_image!("icons/128x128.png");
+                    let _ = window.set_icon(icon);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -55,6 +63,7 @@ pub fn run() {
             recent_task_records_command,
             cancel_task_command,
             import_project_command,
+            delete_project_command,
             check_project_updates_command,
             check_all_project_updates_command,
             pull_project_command,

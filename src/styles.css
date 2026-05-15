@@ -540,6 +540,25 @@ h2 {
   transform: translateY(0);
 }
 
+.danger-button {
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+.danger-button:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+}
+
+.primary-button.danger-button {
+  background: var(--color-danger);
+  color: #fff;
+  border-color: var(--color-danger);
+}
+
+.primary-button.danger-button:hover:not(:disabled) {
+  background: #ff6b6b;
+}
+
 .text-button {
   width: fit-content;
   min-height: 32px;

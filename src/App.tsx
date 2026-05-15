@@ -3,6 +3,7 @@ import {
   checkAllProjectUpdates,
   checkProjectUpdates,
   createAgentProfileDir,
+  deleteProject,
   importProject,
   loadUserConfig,
   loadWorkspaceConfig,
@@ -450,6 +451,11 @@ function App() {
     }
   };
 
+  const deleteProjectHandler = (projectId: string) =>
+    runWorkspaceOperation(`Deleting ${projectId}`, (workspace) =>
+      deleteProject(workspace.root, projectId),
+    );
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="Primary navigation">
@@ -574,6 +580,7 @@ function App() {
                 onWorkspaceChange={applyWorkspaceChange}
                 onTaskChange={updateTaskRecord}
                 onSetProjectHidden={setProjectHidden}
+                onDeleteProject={deleteProjectHandler}
                 operationBusy={operationBusy}
                 workspace={readyWorkspace}
               />

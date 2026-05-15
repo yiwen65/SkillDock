@@ -11,6 +11,7 @@ import type {
 
 type LinkedProfileSkill = {
   linkName: string;
+  projectName: string;
   skillId: string;
   skillName: string;
   sourcePath: string;
@@ -122,12 +123,14 @@ export function AgentsView({
   }, [profiles, workspace.root]);
 
   const linkedSkillsByProfile = useMemo(() => {
+    const projectById = new Map(workspace.projects.map((p) => [p.id, p]));
     const grouped = new Map<string, LinkedProfileSkill[]>();
     for (const skill of workspace.skills) {
       for (const install of skill.installedAgents) {
         const links = grouped.get(install.agentProfileId) ?? [];
         links.push({
           linkName: install.linkName,
+          projectName: projectById.get(skill.sourceProjectId)?.name ?? skill.sourceProjectId,
           skillId: skill.id,
           skillName: skill.name,
           sourcePath: install.sourcePath,
@@ -141,7 +144,7 @@ export function AgentsView({
       links.sort((left, right) => left.skillName.localeCompare(right.skillName));
     }
     return grouped;
-  }, [workspace.skills]);
+  }, [workspace.skills, workspace.projects]);
 
   const startAddProfile = () => {
     if (agentsBusyRef.current) return;
@@ -279,7 +282,7 @@ export function AgentsView({
                       >
                         <div>
                           <strong>{link.skillName}</strong>
-                          <span>{link.linkName}</span>
+                          <span>{link.projectName}</span>
                         </div>
                         <span>{link.status}</span>
                         <button

@@ -63,6 +63,7 @@ export function ProjectsView({
   onPullAll,
   onPullProject,
   onSetProjectHidden,
+  onDeleteProject,
   operationBusy,
   projects,
   taskHistory,
@@ -75,6 +76,7 @@ export function ProjectsView({
   onPullAll: (autostash: boolean) => void;
   onPullProject: (projectId: string, autostash: boolean) => void;
   onSetProjectHidden: (projectId: string, hidden: boolean) => void;
+  onDeleteProject: (projectId: string) => void;
   operationBusy: boolean;
   projects: Project[];
   taskHistory: TaskRecord[];
@@ -85,6 +87,7 @@ export function ProjectsView({
   const [shallow, setShallow] = useState(false);
   const [autostash, setAutostash] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [hiddenFilter, setHiddenFilter] = useState<"visible" | "all" | "hidden">("visible");
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
   const [query, setQuery] = useState("");
@@ -126,6 +129,17 @@ export function ProjectsView({
   const toggleProjectHidden = (project: Project) =>
     runRowAction(async () => {
       await onSetProjectHidden(project.id, !project.hidden);
+    });
+
+  const confirmDeleteProject = (project: Project) => {
+    setDeleteTarget(project);
+  };
+
+  const executeDeleteProject = () =>
+    runRowAction(async () => {
+      if (!deleteTarget) return;
+      setDeleteTarget(null);
+      await onDeleteProject(deleteTarget.id);
     });
 
   const openTaskLogOnce = (taskId: string) =>
@@ -185,6 +199,42 @@ export function ProjectsView({
 
   return (
     <>
+      {deleteTarget && (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setDeleteTarget(null)}>
+          <div
+            className="data-panel compact-form import-dialog"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <PanelHeader title="Delete project" detail="" />
+            <p>
+              Are you sure you want to delete <strong>{deleteTarget.name}</strong>?
+            </p>
+            <p className="form-error">
+              This will permanently remove the directory:
+              <br />
+              {deleteTarget.path}
+            </p>
+            <div className="panel-actions">
+              <button
+                className="primary-button danger-button"
+                onClick={executeDeleteProject}
+                type="button"
+              >
+                Delete
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => setDeleteTarget(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {importOpen && (
         <div className="dialog-backdrop" role="presentation">
           <form
@@ -404,6 +454,14 @@ export function ProjectsView({
                       type="button"
                     >
                       {project.hidden ? "Show" : "Hide"}
+                    </button>
+                    <button
+                      className="secondary-button danger-button"
+                      disabled={rowActionBusy || operationBusy}
+                      onClick={() => confirmDeleteProject(project)}
+                      type="button"
+                    >
+                      Delete
                     </button>
                   </div>
                 </article>

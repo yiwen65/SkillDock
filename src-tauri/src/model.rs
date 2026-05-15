@@ -391,6 +391,7 @@ pub enum TaskStatus {
 pub enum TaskKind {
     ScanWorkspace,
     ImportProject,
+    DeleteProject,
     FetchProject,
     PullProject,
     SyncAllProjects,

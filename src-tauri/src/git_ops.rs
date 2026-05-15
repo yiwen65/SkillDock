@@ -207,6 +207,86 @@ pub fn import_project_command(
     import_project_at(workspace_root, &user_config.agent_profiles, request)
 }
 
+pub fn delete_project_at(
+    workspace_root: impl AsRef<Path>,
+    agent_profiles: &[AgentProfile],
+    project_id: &str,
+) -> Result<TaskOperationResult, GitOperationError> {
+    let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
+        .map_err(GitOperationError::workspace)?;
+    safe_project_dir_name(project_id)?;
+    let target_path = workspace_root.join(project_id);
+    if !target_path.exists() {
+        return Err(GitOperationError {
+            kind: GitOperationErrorKind::InvalidRepository,
+            path: Some(target_path.display().to_string()),
+            message: format!("Project directory '{}' does not exist.", project_id),
+        });
+    }
+    let canonical_target = fs::canonicalize(&target_path)
+        .map_err(|e| GitOperationError::workspace(WorkspaceError::io(&target_path, e.to_string())))?;
+    if !canonical_target.starts_with(&workspace_root) {
+        return Err(GitOperationError::workspace(
+            WorkspaceError::outside_workspace(&canonical_target),
+        ));
+    }
+
+    let profiles = agent_profiles.to_vec();
+    let result_workspace = Arc::new(Mutex::new(None::<Workspace>));
+    let result_workspace_for_task = Arc::clone(&result_workspace);
+    let workspace_root_for_task = workspace_root.clone();
+    let project_id_owned = project_id.to_string();
+
+    let task = run_workspace_task_blocking(
+        workspace_root.display().to_string(),
+        TaskKind::DeleteProject,
+        format!("Delete {}", project_id_owned),
+        move |context| {
+            context.stdout(format!("Removing directory: {}", canonical_target.display()));
+            match fs::remove_dir_all(&canonical_target) {
+                Ok(()) => {
+                    if let Ok(workspace) =
+                        scan_workspace_at(&workspace_root_for_task, &profiles)
+                    {
+                        *result_workspace_for_task
+                            .lock()
+                            .expect("delete result workspace lock poisoned") = Some(workspace);
+                    }
+                    TaskOutcome::succeeded(format!("Deleted {}", project_id_owned))
+                }
+                Err(err) => TaskOutcome::failed(
+                    format!("Delete failed for {}", project_id_owned),
+                    err.to_string(),
+                ),
+            }
+        },
+    );
+
+    let workspace = result_workspace
+        .lock()
+        .expect("delete result workspace lock poisoned")
+        .clone()
+        .unwrap_or_else(|| {
+            scan_workspace_at(&workspace_root, agent_profiles).unwrap_or_else(|_| Workspace {
+                root: workspace_root.display().to_string(),
+                projects: Vec::new(),
+                skills: Vec::new(),
+                agent_profiles: Vec::new(),
+            })
+        });
+
+    Ok(TaskOperationResult { task, workspace })
+}
+
+#[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
+pub fn delete_project_command(
+    workspace_root: String,
+    project_id: String,
+) -> Result<TaskOperationResult, GitOperationError> {
+    let user_config = load_user_config().map_err(GitOperationError::config)?;
+    delete_project_at(workspace_root, &user_config.agent_profiles, &project_id)
+}
+
 pub fn check_project_updates_at(
     workspace_root: impl AsRef<Path>,
     agent_profiles: &[AgentProfile],

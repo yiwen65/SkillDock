@@ -27,6 +27,7 @@ export function CoreView({
   onPullAll,
   onPullProject,
   onSetProjectHidden,
+  onDeleteProject,
   operationBusy,
   focusedTaskId,
   taskHistory,
@@ -45,6 +46,7 @@ export function CoreView({
   onPullAll: (autostash: boolean) => void;
   onPullProject: (projectId: string, autostash: boolean) => void;
   onSetProjectHidden: (projectId: string, hidden: boolean) => void;
+  onDeleteProject: (projectId: string) => void;
   operationBusy: boolean;
   focusedTaskId: string | null;
   taskHistory: TaskRecord[];
@@ -69,6 +71,7 @@ export function CoreView({
           onPullAll={onPullAll}
           onPullProject={onPullProject}
           onSetProjectHidden={onSetProjectHidden}
+          onDeleteProject={onDeleteProject}
           operationBusy={operationBusy}
           projects={workspace.projects}
           taskHistory={taskHistory}

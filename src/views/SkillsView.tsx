@@ -53,7 +53,15 @@ export function SkillsView({
   onOperationResult: (result: TaskOperationResult) => void;
   workspace: Workspace;
 }) {
-  const { agentProfiles, projects, skills } = workspace;
+  const { agentProfiles, projects } = workspace;
+  const hiddenProjectIds = useMemo(
+    () => new Set(projects.filter((p) => p.hidden).map((p) => p.id)),
+    [projects],
+  );
+  const skills = useMemo(
+    () => workspace.skills.filter((s) => !hiddenProjectIds.has(s.sourceProjectId)),
+    [workspace.skills, hiddenProjectIds],
+  );
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");

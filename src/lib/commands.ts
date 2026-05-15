@@ -116,6 +116,13 @@ export function importProject(
   return invokeCommand<TaskOperationResult>("import_project_command", { workspaceRoot, request });
 }
 
+export function deleteProject(
+  workspaceRoot: string,
+  projectId: string,
+): Promise<TaskOperationResult> {
+  return invokeCommand<TaskOperationResult>("delete_project_command", { workspaceRoot, projectId });
+}
+
 export function checkProjectUpdates(
   workspaceRoot: string,
   projectId: string,

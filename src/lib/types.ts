@@ -339,6 +339,7 @@ export type TaskStatus = "queued" | "running" | "succeeded" | "skipped" | "faile
 export type TaskKind =
   | "scan_workspace"
   | "import_project"
+  | "delete_project"
   | "fetch_project"
   | "pull_project"
   | "sync_all_projects"
