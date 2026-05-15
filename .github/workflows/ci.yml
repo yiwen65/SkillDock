@@ -69,6 +69,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
+          cache-bin: false
 
       # The default feature set in src-tauri/Cargo.toml excludes the Tauri
       # shell (tauri is an optional dep gated behind the `desktop` feature),

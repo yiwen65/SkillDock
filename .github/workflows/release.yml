@@ -92,6 +92,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
+          cache-bin: false
           # Release builds differ from debug; keep a release-specific cache key.
           key: release-${{ matrix.label }}
 
