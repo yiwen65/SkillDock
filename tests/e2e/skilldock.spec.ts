@@ -193,7 +193,7 @@ test("covers task logs and settings persistence", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Preferences" })).toBeVisible();
-  await page.getByLabel("Theme").selectOption("dark");
+  await page.getByLabel("Project sort").selectOption("updated");
   // The interval field is only rendered when "Enable automatic checks" is
   // on, and its unit switched from minutes to days (intervalMinutes patch
   // value is `days * 1440`). 1 day → 1440 minutes, matching the check below.
@@ -208,7 +208,8 @@ test("covers task logs and settings persistence", async ({ page }) => {
     calls.some(
       (call) =>
         call.command === "patch_user_preferences_command" &&
-        call.args.patch.uiPreferences.theme === "dark" &&
+        call.args.patch.uiPreferences.theme === "system" &&
+        call.args.patch.uiPreferences.projectSort === "updated" &&
         call.args.patch.automaticChecks.intervalMinutes === 1440,
     ),
   ).toBe(true);
