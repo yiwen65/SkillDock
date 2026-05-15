@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { previewUnlinkSkill, saveAgentProfiles, scanWorkspace, unlinkSkill } from "../lib/commands";
 import { EmptyState, PanelHeader, errorMessage } from "../lib/shared";
 import type {
@@ -93,7 +93,7 @@ function emptyCustomProfile(): AgentProfile {
   };
 }
 
-export function AgentsView({
+export const AgentsView = memo(function AgentsView({
   onCreateAgentDir,
   onOperationResult,
   onWorkspaceChange,
@@ -398,4 +398,4 @@ export function AgentsView({
       </div>
     </section>
   );
-}
+});

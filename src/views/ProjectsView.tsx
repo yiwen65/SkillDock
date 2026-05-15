@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { projectUpdateDetail, projectUpdateTitle } from "../lib/format";
 import { openWorkspacePathWithCopyFallback } from "../lib/openPathFallback";
 import { EmptyState, PanelHeader } from "../lib/shared";
+import { VirtualList } from "../lib/VirtualList";
 import type { GitStatus, Project, TaskRecord } from "../lib/types";
 
 type ProjectErrorLink = {
@@ -55,7 +56,7 @@ export function buildLatestProjectErrorIndex(tasks: TaskRecord[], workspaceRoot:
   return errors;
 }
 
-export function ProjectsView({
+export const ProjectsView = memo(function ProjectsView({
   onCheckAll,
   onCheckProject,
   onImport,
@@ -380,8 +381,12 @@ export function ProjectsView({
             body="Adjust filters to show more repositories."
           />
         ) : (
-          <div className="table-list">
-            {visibleProjects.map((project) => {
+          <VirtualList
+            className="table-list project-list"
+            estimateSize={132}
+            itemKey={(project) => project.id}
+            items={visibleProjects}
+            renderItem={(project) => {
               const projectError = projectErrorById.get(project.id);
               return (
                 <article className="list-row project-row" key={project.id}>
@@ -466,10 +471,10 @@ export function ProjectsView({
                   </div>
                 </article>
               );
-            })}
-          </div>
+            }}
+          />
         )}
       </section>
     </>
   );
-}
+});
