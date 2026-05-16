@@ -232,6 +232,46 @@ export type WorkspaceProjectMetadata = {
   autoPull?: boolean;
 };
 
+export type CatalogRepository = {
+  schemaVersion: number;
+  id: string;
+  remoteUrl: string;
+  directoryName: string;
+  state: CatalogRepositoryState;
+  branch?: string;
+  shallow: boolean;
+  addedAt: string;
+  updatedAt: string;
+};
+
+export type CatalogRepositoryState = "active" | "removed";
+
+export type CatalogProjectComparison = {
+  id: string;
+  remoteUrl: string;
+  directoryName: string;
+  localPath?: string;
+};
+
+export type WorkspaceCatalogSummary = {
+  catalogPath: string;
+  repositories: CatalogRepository[];
+  missing: CatalogProjectComparison[];
+  localOnly: CatalogProjectComparison[];
+  activeCount: number;
+  missingCount: number;
+  localOnlyCount: number;
+  gitSyncAvailable: boolean;
+  gitRemote?: string;
+};
+
+export type CatalogSyncResult = {
+  status: TaskStatus;
+  summary: string;
+  stdout: string;
+  stderr: string;
+};
+
 export type UserConfig = {
   schemaVersion: number;
   recentWorkspaces: string[];
@@ -340,6 +380,8 @@ export type TaskKind =
   | "scan_workspace"
   | "import_project"
   | "delete_project"
+  | "restore_catalog"
+  | "sync_catalog"
   | "fetch_project"
   | "pull_project"
   | "sync_all_projects"

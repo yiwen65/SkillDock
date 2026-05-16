@@ -38,7 +38,7 @@ export const CoreView = React.memo(function CoreView({
   onCheckAll: () => void;
   onCheckProject: (projectId: string) => void;
   onImport: (source: string, directoryName: string, shallow: boolean) => void;
-  onCreateAgentDir: (profile: AgentProfileState) => void;
+  onCreateAgentDir: (profile: AgentProfileState) => Promise<void> | void;
   onBatchLinkResult: (result: BatchLinkOperationResult) => void;
   onOperationResult: (result: TaskOperationResult) => void;
   onWorkspaceChange: (workspace: Workspace, message: string) => void;
@@ -95,6 +95,7 @@ export const CoreView = React.memo(function CoreView({
       )}
       {activeView === "Settings" && (
         <SettingsView
+          onOperationResult={onOperationResult}
           onThemePreferenceChange={onThemePreferenceChange}
           onWorkspaceChange={onWorkspaceChange}
           workspace={workspace}

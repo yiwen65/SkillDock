@@ -1,13 +1,25 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
+  initializeCatalogGitSync,
   loadUserConfig,
+  loadWorkspaceCatalogSummary,
   patchUserPreferences,
+  publishCatalogGitSync,
+  pullCatalogGitSync,
+  restoreMissingCatalogRepositories,
   saveAgentProfiles,
   scanWorkspace,
   selectWorkspace,
+  syncWorkspaceCatalogFromProjects,
 } from "../lib/commands";
 import { PanelHeader, errorMessage, type ThemePreference } from "../lib/shared";
-import type { AgentProfile, UserConfig, Workspace } from "../lib/types";
+import type {
+  AgentProfile,
+  TaskOperationResult,
+  UserConfig,
+  Workspace,
+  WorkspaceCatalogSummary,
+} from "../lib/types";
 
 function clampAutomaticCheckInterval(value: number) {
   if (!Number.isFinite(value)) return 1440;
@@ -51,22 +63,65 @@ function normalizeProfilePathForCompare(path: string) {
   return normalized;
 }
 
-function validateProfileDrafts(profiles: AgentProfile[]) {
+function isValidProfileId(id: string) {
+  return /^[a-zA-Z0-9._-]+$/.test(id);
+}
+
+function profileDraftLabel(profile: AgentProfile, index: number) {
+  return profile.name.trim() || `Profile ${index + 1}`;
+}
+
+function slugifyProfileId(value: string) {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 48);
+  if (!slug || slug === "." || slug === ".." || slug === ".git") return "custom-agent";
+  return slug;
+}
+
+function inferProfileId(profile: AgentProfile, index: number) {
+  const existing = profile.id.trim();
+  if (existing && existing === profile.id && isValidProfileId(existing)) return existing;
+  const skillsDirName = profile.skillsDir
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .pop();
+  return slugifyProfileId(profile.name || skillsDirName || `custom-agent-${index + 1}`);
+}
+
+export function normalizeProfileDrafts(profiles: AgentProfile[]) {
   const ids = new Set<string>();
-  const skillsDirs = new Set<string>();
-  for (const profile of profiles) {
-    const id = profile.id.trim();
-    if (!id) return "Profile id is required.";
-    if (profile.id !== id)
-      return `Profile id '${id}' must not contain leading or trailing whitespace.`;
-    if (!/^[a-zA-Z0-9._-]+$/.test(id))
-      return `Profile id '${id}' may only use letters, numbers, dots, underscores and hyphens.`;
-    if (ids.has(id)) return `Profile id '${id}' is duplicated.`;
+  return profiles.map((profile, index) => {
+    const baseId = inferProfileId(profile, index);
+    let id = baseId;
+    let suffix = 2;
+    while (ids.has(id)) {
+      id = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
     ids.add(id);
-    if (!profile.name.trim()) return `Profile '${id}' requires a name.`;
+    return {
+      ...profile,
+      id,
+      name: profile.name.trim(),
+      skillsDir: profile.skillsDir.trim(),
+    };
+  });
+}
+
+export function validateProfileDrafts(profiles: AgentProfile[]) {
+  const skillsDirs = new Set<string>();
+  for (const [index, profile] of profiles.entries()) {
+    const label = profileDraftLabel(profile, index);
+    if (!profile.name.trim()) return `${label} requires a name.`;
     const skillsDir = profile.skillsDir.trim();
     if (!isValidProfilePath(skillsDir))
-      return `Profile '${id}' requires an absolute or home-relative skills directory.`;
+      return `${label} requires an absolute or home-relative skills directory.`;
     const normalizedSkillsDir = normalizeProfilePathForCompare(skillsDir);
     if (skillsDirs.has(normalizedSkillsDir))
       return `Profile skills directory '${skillsDir}' is duplicated.`;
@@ -75,12 +130,44 @@ function validateProfileDrafts(profiles: AgentProfile[]) {
   return null;
 }
 
+export function catalogActionState({
+  busy,
+  catalog,
+  catalogRestorePending,
+  catalogRemoteDraft,
+  workspaceRoot,
+}: {
+  busy: boolean;
+  catalog: WorkspaceCatalogSummary | null;
+  catalogRestorePending: boolean;
+  catalogRemoteDraft: string;
+  workspaceRoot: string;
+}) {
+  const hasWorkspace = workspaceRoot.trim().length > 0;
+  const hasCatalogRemote = Boolean(catalog?.gitRemote?.trim());
+  const hasCatalogRemoteDraft = catalogRemoteDraft.trim().length > 0;
+  const canPullOrPublishCatalog =
+    hasWorkspace && Boolean(catalog?.gitSyncAvailable) && hasCatalogRemote;
+
+  return {
+    cloneMissingDisabled: busy || catalogRestorePending || !hasWorkspace || !catalog?.missingCount,
+    initSyncDisabled: busy || !hasWorkspace || !hasCatalogRemoteDraft,
+    publishListDisabled: busy || !canPullOrPublishCatalog,
+    pullListDisabled: busy || !canPullOrPublishCatalog,
+    refreshDisabled: busy || !hasWorkspace,
+    remoteInputDisabled: busy,
+    saveLocalListDisabled: busy || !hasWorkspace,
+  };
+}
+
 export const SettingsView = memo(function SettingsView({
   onThemePreferenceChange,
+  onOperationResult,
   onWorkspaceChange,
   workspace,
 }: {
   onThemePreferenceChange: (theme: ThemePreference) => void;
+  onOperationResult: (result: TaskOperationResult) => void;
   onWorkspaceChange: (workspace: Workspace, message: string) => void;
   workspace: Workspace;
 }) {
@@ -89,12 +176,26 @@ export const SettingsView = memo(function SettingsView({
   const [profileDrafts, setProfileDrafts] = useState<AgentProfile[]>(
     workspace.agentProfiles.map((state) => state.profile),
   );
+  const [catalog, setCatalog] = useState<WorkspaceCatalogSummary | null>(null);
+  const [catalogRemoteDraft, setCatalogRemoteDraft] = useState("");
+  const [catalogRestorePending, setCatalogRestorePending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Ref guard backs up the `busy` state so a rapid second click landing in the
   // tiny window before React applies the disabled prop cannot fire an extra
   // backend call.
   const busyRef = useRef(false);
+  const workspaceProjectSignature = useMemo(
+    () => workspace.projects.map((project) => `${project.id}:${project.remoteUrl || ""}`).join("|"),
+    [workspace.projects],
+  );
+  const catalogActions = catalogActionState({
+    busy,
+    catalog,
+    catalogRestorePending,
+    catalogRemoteDraft,
+    workspaceRoot: workspace.root,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -116,7 +217,24 @@ export const SettingsView = memo(function SettingsView({
 
   useEffect(() => {
     setWorkspaceDraft("");
-  }, [workspace.root]);
+    setCatalog(null);
+    setCatalogRemoteDraft("");
+    if (!workspace.root) return;
+    let cancelled = false;
+    loadWorkspaceCatalogSummary(workspace.root)
+      .then((summary) => {
+        if (cancelled) return;
+        setCatalog(summary);
+        setCatalogRemoteDraft(summary.gitRemote || "");
+        setCatalogRestorePending(false);
+      })
+      .catch((error) => {
+        if (!cancelled) setMessage(errorMessage(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace.root, workspaceProjectSignature]);
 
   const updateConfig = (update: (current: UserConfig) => UserConfig) => {
     if (!config) return;
@@ -187,11 +305,7 @@ export const SettingsView = memo(function SettingsView({
 
   const saveProfiles = async () => {
     if (busyRef.current) return;
-    const normalizedProfiles = profileDrafts.map((profile) => ({
-      ...profile,
-      name: profile.name.trim(),
-      skillsDir: profile.skillsDir.trim(),
-    }));
+    const normalizedProfiles = normalizeProfileDrafts(profileDrafts);
     const validationError = validateProfileDrafts(normalizedProfiles);
     if (validationError) {
       setMessage(validationError);
@@ -207,6 +321,119 @@ export const SettingsView = memo(function SettingsView({
       setProfileDrafts(saved.agentProfiles);
       onWorkspaceChange(nextWorkspace, "Agent profiles saved.");
       setMessage("Agent profiles saved.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const refreshCatalog = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setMessage("Loading catalog...");
+    try {
+      const summary = await loadWorkspaceCatalogSummary(workspace.root);
+      setCatalog(summary);
+      setCatalogRemoteDraft(summary.gitRemote || "");
+      setCatalogRestorePending(false);
+      setMessage("Catalog refreshed.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const saveCatalogFromProjects = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setMessage("Saving local project list to catalog...");
+    try {
+      const summary = await syncWorkspaceCatalogFromProjects(workspace.root);
+      setCatalog(summary);
+      setMessage(`Catalog saved with ${summary.activeCount} active repositories.`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const restoreCatalogRepositories = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setMessage("Restoring missing catalog repositories...");
+    try {
+      const result = await restoreMissingCatalogRepositories(workspace.root);
+      onOperationResult(result);
+      setCatalogRestorePending(true);
+      setMessage(`${result.task.summary} queued. Watch Logs for progress.`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const initializeCatalogSync = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setMessage("Initializing catalog Git sync...");
+    try {
+      const result = await initializeCatalogGitSync(
+        workspace.root,
+        catalogRemoteDraft.trim() || undefined,
+      );
+      const summary = await loadWorkspaceCatalogSummary(workspace.root);
+      setCatalog(summary);
+      setMessage(result.summary);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const pullCatalog = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setMessage("Pulling catalog updates...");
+    try {
+      const result = await pullCatalogGitSync(workspace.root);
+      const nextWorkspace = await scanWorkspace(workspace.root);
+      const summary = await loadWorkspaceCatalogSummary(workspace.root);
+      setCatalog(summary);
+      onWorkspaceChange(nextWorkspace, result.summary);
+      setMessage(result.summary);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const publishCatalog = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setMessage("Publishing catalog updates...");
+    try {
+      const result = await publishCatalogGitSync(workspace.root);
+      const summary = await loadWorkspaceCatalogSummary(workspace.root);
+      setCatalog(summary);
+      setMessage(result.summary);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -284,6 +511,109 @@ export const SettingsView = memo(function SettingsView({
             ))}
           </div>
         )}
+      </section>
+
+      <section className="data-panel compact-form settings-grid">
+        <PanelHeader
+          title="Catalog sync"
+          detail={
+            catalog
+              ? `${catalog.activeCount} tracked, ${catalog.missingCount} missing`
+              : "Not loaded"
+          }
+        />
+        <div className="catalog-stat-grid">
+          <div>
+            <span className="setting-label">Tracked</span>
+            <strong>{catalog?.activeCount ?? 0}</strong>
+          </div>
+          <div>
+            <span className="setting-label">Missing here</span>
+            <strong>{catalog?.missingCount ?? 0}</strong>
+          </div>
+          <div>
+            <span className="setting-label">Local only</span>
+            <strong>{catalog?.localOnlyCount ?? 0}</strong>
+          </div>
+        </div>
+        <label>
+          <span>Catalog remote</span>
+          <input
+            onChange={(event) => setCatalogRemoteDraft(event.target.value)}
+            placeholder="git@github.com:you/skilldock-catalog.git"
+            value={catalogRemoteDraft}
+            disabled={catalogActions.remoteInputDisabled}
+          />
+        </label>
+        <div className="panel-actions">
+          <button
+            className="secondary-button"
+            disabled={catalogActions.refreshDisabled}
+            onClick={refreshCatalog}
+            type="button"
+          >
+            Refresh
+          </button>
+          <button
+            className="secondary-button"
+            disabled={catalogActions.saveLocalListDisabled}
+            onClick={saveCatalogFromProjects}
+            type="button"
+          >
+            Save local list
+          </button>
+          <button
+            className="secondary-button"
+            disabled={catalogActions.cloneMissingDisabled}
+            onClick={restoreCatalogRepositories}
+            type="button"
+          >
+            Clone missing
+          </button>
+        </div>
+        <div className="panel-actions">
+          <button
+            className="secondary-button"
+            disabled={catalogActions.initSyncDisabled}
+            onClick={initializeCatalogSync}
+            type="button"
+          >
+            Init sync
+          </button>
+          <button
+            className="secondary-button"
+            disabled={catalogActions.pullListDisabled}
+            onClick={pullCatalog}
+            type="button"
+          >
+            Pull list
+          </button>
+          <button
+            className="primary-button"
+            disabled={catalogActions.publishListDisabled}
+            onClick={publishCatalog}
+            type="button"
+          >
+            Publish list
+          </button>
+        </div>
+        {catalog?.gitRemote && <p className="batch-message">Remote: {catalog.gitRemote}</p>}
+        {catalog?.missing.length ? (
+          <div className="catalog-list">
+            <span className="setting-label">Missing repositories</span>
+            {catalog.missing.slice(0, 5).map((item) => (
+              <span key={item.id}>{item.directoryName}</span>
+            ))}
+          </div>
+        ) : null}
+        {catalog?.localOnly.length ? (
+          <div className="catalog-list">
+            <span className="setting-label">Local repositories not in catalog</span>
+            {catalog.localOnly.slice(0, 5).map((item) => (
+              <span key={item.id}>{item.directoryName}</span>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="data-panel compact-form settings-grid">
@@ -412,17 +742,6 @@ export const SettingsView = memo(function SettingsView({
         <div className="settings-profile-list">
           {profileDrafts.map((profile, index) => (
             <article className="settings-profile-row" key={`${index}:${profile.id}`}>
-              <label>
-                <span>Id</span>
-                <input
-                  disabled={profile.builtIn}
-                  onChange={(event) =>
-                    updateProfile(index, (item) => ({ ...item, id: event.target.value }))
-                  }
-                  placeholder="custom-agent"
-                  value={profile.id}
-                />
-              </label>
               <label>
                 <span>Name</span>
                 <input

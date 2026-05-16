@@ -5,6 +5,7 @@ import type {
   BatchLinkOperationResult,
   BatchLinkPreview,
   BatchLinkPreviewRequest,
+  CatalogSyncResult,
   ExecuteLinkSkillRequest,
   ExecuteUnlinkSkillRequest,
   ImportProjectRequest,
@@ -20,6 +21,7 @@ import type {
   UserConfig,
   UserPreferencesPatch,
   Workspace,
+  WorkspaceCatalogSummary,
   WorkspaceConfig,
 } from "./types";
 
@@ -54,6 +56,48 @@ export function saveWorkspaceConfig(
   return invokeCommand<WorkspaceConfig>("save_workspace_config_command", { workspaceRoot, config });
 }
 
+export function loadWorkspaceCatalogSummary(
+  workspaceRoot: string,
+): Promise<WorkspaceCatalogSummary> {
+  return invokeCommand<WorkspaceCatalogSummary>("load_workspace_catalog_summary_command", {
+    workspaceRoot,
+  });
+}
+
+export function syncWorkspaceCatalogFromProjects(
+  workspaceRoot: string,
+): Promise<WorkspaceCatalogSummary> {
+  return invokeCommand<WorkspaceCatalogSummary>("sync_workspace_catalog_from_projects_command", {
+    workspaceRoot,
+  });
+}
+
+export function restoreMissingCatalogRepositories(
+  workspaceRoot: string,
+): Promise<TaskOperationResult> {
+  return invokeCommand<TaskOperationResult>("restore_missing_catalog_repositories_command", {
+    workspaceRoot,
+  });
+}
+
+export function initializeCatalogGitSync(
+  workspaceRoot: string,
+  remoteUrl?: string,
+): Promise<CatalogSyncResult> {
+  return invokeCommand<CatalogSyncResult>("initialize_catalog_git_sync_command", {
+    workspaceRoot,
+    remoteUrl,
+  });
+}
+
+export function pullCatalogGitSync(workspaceRoot: string): Promise<CatalogSyncResult> {
+  return invokeCommand<CatalogSyncResult>("pull_catalog_git_sync_command", { workspaceRoot });
+}
+
+export function publishCatalogGitSync(workspaceRoot: string): Promise<CatalogSyncResult> {
+  return invokeCommand<CatalogSyncResult>("publish_catalog_git_sync_command", { workspaceRoot });
+}
+
 export function loadUserConfig(): Promise<UserConfig> {
   return invokeCommand<UserConfig>("load_user_config_command");
 }
@@ -68,12 +112,14 @@ export function saveAgentProfiles(profiles: AgentProfile[]): Promise<UserConfig>
 
 export function createAgentProfileDir(
   workspaceRoot: string,
-  profileId: string,
+  profile: AgentProfile,
+  resolvedSkillsDir: string,
   confirmed: boolean,
 ): Promise<Workspace> {
   return invokeCommand<Workspace>("create_agent_profile_dir_command", {
     workspaceRoot,
-    profileId,
+    profile,
+    resolvedSkillsDir,
     confirmed,
   });
 }

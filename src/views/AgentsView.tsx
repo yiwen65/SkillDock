@@ -157,8 +157,12 @@ export const AgentsView = memo(function AgentsView({
     if (agentsBusyRef.current) return;
     agentsBusyRef.current = true;
     setAgentsBusy(true);
+    setProfileMessage(`Creating ${profile.profile.name} directory...`);
     try {
       await onCreateAgentDir(profile);
+      setProfileMessage(`${profile.profile.name} directory created.`);
+    } catch (error) {
+      setProfileMessage(errorMessage(error));
     } finally {
       agentsBusyRef.current = false;
       setAgentsBusy(false);
