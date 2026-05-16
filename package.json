@@ -2,8 +2,28 @@
   "name": "skilldock",
   "private": true,
   "version": "0.3.1",
+  "description": "Local-first Git workspace and symlink installer for AI agent skills across Claude Code, Codex, and custom agents.",
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
+  "keywords": [
+    "ai-agent-skills",
+    "agent-skills",
+    "claude-code",
+    "codex",
+    "skill-manager",
+    "skill-installer",
+    "symlink",
+    "git-workspace",
+    "tauri",
+    "desktop-app"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yiwen65/SkillDock.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yiwen65/SkillDock/issues"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "desktop:dev-entry": "node scripts/install-dev-desktop-entry.mjs",

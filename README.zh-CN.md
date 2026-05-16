@@ -1,9 +1,12 @@
 <div align="center">
   <img src="public/app-icon.png" alt="SkillDock" width="128" height="128" />
   <h1>SkillDock</h1>
-  <p><strong>本地优先的 agent skills / plugins / tools 收藏夹管理器</strong></p>
+  <p><strong>面向 AI Agent Skills 的本地 Git 工作区与软链接安装器</strong></p>
   <p><a href="README.md">English</a> | <strong>简体中文</strong></p>
   <p>
+    <img src="https://img.shields.io/badge/Claude%20Code-skills-111111" alt="Claude Code skills" />
+    <img src="https://img.shields.io/badge/Codex-skills-111111" alt="Codex skills" />
+    <img src="https://img.shields.io/badge/install-symlink-0E7C7B" alt="symlink install" />
     <img src="https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri" alt="Tauri 2" />
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React 18" />
     <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript" alt="TypeScript" />
@@ -15,13 +18,58 @@
 
 ---
 
-SkillDock 把一组 `git clone` 来的 agent 相关仓库（skills、plugins、tools、design resources）集中到一个 **workspace**，用图形界面完成导入、更新检查、`SKILL.md` 预览、以及向 Claude Code / Codex / 自定义 agent 的软链接安装和卸载。它是此前 `scripts/link-skill.sh`、`scripts/list-skills.sh`、`scripts/sync-projects.sh` 三个 shell 工具的 UI 封装与统一抽象。
+SkillDock 是一个桌面端管理器，面向需要在 Claude Code、Codex 和自定义 coding agent 之间复用 **AI Agent Skills** 的用户。
+
+它不把 `SKILL.md` 文件夹复制到每个 agent 目录，而是把来源仓库统一放进一个本地 Git workspace，再通过 **软链接** 安装到不同 agent。一个来源，多处可用，避免重复拷贝、版本混乱和手动维护。
+
+## 为什么需要 SkillDock？
+
+- **从 GitHub 导入 skills** —— 把公开、私有、个人或团队 skill 仓库 clone 到同一个 workspace。
+- **保留上游历史** —— 用 Git 更新来源仓库，不再追踪一堆被复制散落的文件夹。
+- **安装但不复制** —— 通过软链接安装到 `~/.claude/skills`、`~/.codex/skills` 或任意自定义 agent 目录。
+- **看清每个 agent 用了什么** —— 在变更前预览来源仓库、相对路径、安装目标、冲突和当前状态。
+- **统一管理开源与私有 skills** —— 热门开源 skill 仓库和你自己的私有 skill 库使用同一套流程。
+
+SkillDock 不是云端 skill marketplace，而是一个本地优先的控制台，用来管理你已经信任的 Git 仓库。
+
+## 典型场景
+
+- 在 Claude Code、Codex 和自定义 agent 里使用同一批精选 skills。
+- 把自己写的 skills 放进私有 Git 仓库，再安装到本机多个 agent，不复制目录。
+- 试用社区 skill 仓库，同时保留来源路径、更新路径和安装目标的可追溯性。
+- 多台设备之间通过 Git 同步同一套 SkillDock workspace 结构。
 
 ## 界面预览
 
 ![SkillDock Skills 视图](docs/images/skills-view.png)
 
 Skills 视图：左侧导航、顶部 workspace 概览（Projects / Skills / Agents / Installs），中部是带搜索与过滤的 skill 列表，右侧是选中 skill 的安装目标面板，可单独或批量软链接到已配置的 agent 目录。
+
+## 工作方式
+
+```text
+一个 workspace 中的 Git 仓库
+        |
+        | 扫描 SKILL.md 文件夹
+        v
+SkillDock inventory
+        |
+        | 创建 / 移除安全软链接
+        v
+Claude Code、Codex 或自定义 agent skills 目录
+```
+
+示例结构：
+
+```text
+~/AgentSkills/
+├── awesome-claude-skills/       # git clone
+├── personal-agent-skills/       # 你自己的 Git 仓库
+└── .skilldock/config.json       # workspace metadata
+
+~/.claude/skills/code-review -> ~/AgentSkills/personal-agent-skills/code-review
+~/.codex/skills/code-review  -> ~/AgentSkills/personal-agent-skills/code-review
+```
 
 ## 核心能力
 
@@ -145,6 +193,8 @@ SkillDock/
 ## 文档
 
 - [贡献指南](CONTRIBUTING.zh-CN.md) —— 分支流程、必需 CI 检查、发布步骤
+- [安全策略](SECURITY.md) —— 安全边界与漏洞报告方式
+- [GitHub 曝光清单](docs/GITHUB_DISCOVERY.md) —— 仓库简介、topics 与发布文案建议
 - [发布流程](docs/RELEASING.md)(英文)—— 打 tag、macOS 代码签名与公证、Tauri updater 签名
 - [产品与架构设计](docs/skilldock.md)
 - [实施计划](docs/skilldock-implementation-plan.md)

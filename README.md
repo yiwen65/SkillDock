@@ -1,9 +1,12 @@
 <div align="center">
   <img src="public/app-icon.png" alt="SkillDock" width="128" height="128" />
   <h1>SkillDock</h1>
-  <p><strong>A local-first manager for your agent skills, plugins, and tools collection</strong></p>
+  <p><strong>Local-first Git workspace and symlink installer for AI agent skills</strong></p>
   <p><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></p>
   <p>
+    <img src="https://img.shields.io/badge/Claude%20Code-skills-111111" alt="Claude Code skills" />
+    <img src="https://img.shields.io/badge/Codex-skills-111111" alt="Codex skills" />
+    <img src="https://img.shields.io/badge/install-symlink-0E7C7B" alt="symlink install" />
     <img src="https://img.shields.io/badge/Tauri-2.x-24C8DB?logo=tauri" alt="Tauri 2" />
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react" alt="React 18" />
     <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript" alt="TypeScript" />
@@ -15,13 +18,58 @@
 
 ---
 
-SkillDock gathers a set of `git clone`-d agent-related repositories (skills, plugins, tools, design resources) into a single **workspace**, and gives you a GUI to import, check updates, preview `SKILL.md` files, and symlink skills into Claude Code, Codex, or any custom agent's skills directory. It is the UI and unified abstraction over what used to be three shell scripts: `scripts/link-skill.sh`, `scripts/list-skills.sh`, and `scripts/sync-projects.sh`.
+SkillDock is a desktop manager for people who collect, write, and reuse **AI agent skills** across Claude Code, Codex, and custom coding agents.
+
+Instead of copying `SKILL.md` folders into every agent, SkillDock keeps the source repositories in one local Git workspace and installs skills with **symlinks**. One source of truth, many agents, no duplicated skill folders.
+
+## Why SkillDock?
+
+- **Import skills from GitHub** — clone public, private, personal, or team skill repositories into one workspace.
+- **Keep upstream history intact** — update source repositories with Git instead of losing track of copied files.
+- **Install without duplication** — symlink skills into `~/.claude/skills`, `~/.codex/skills`, or any custom agent directory.
+- **Audit what every agent uses** — see source repo, relative path, install target, conflicts, and current status before changing anything.
+- **Manage local and remote collections together** — use the same workflow for popular open skill repos and your own private skill library.
+
+SkillDock is not another cloud skill marketplace. It is a local-first control panel for the Git repositories you already trust.
+
+## Common Use Cases
+
+- Keep the same curated skills available in Claude Code, Codex, and a custom agent.
+- Put your own skills in a private Git repo, then install them locally without copying folders.
+- Try community skill repositories while keeping the source path, update path, and install target traceable.
+- Sync the same SkillDock workspace structure across multiple machines through Git.
 
 ## Screenshot
 
 ![SkillDock Skills view](docs/images/skills-view.png)
 
 Skills view: left-hand navigation, workspace stats at the top (Projects / Skills / Agents / Installs), a searchable and filterable skill list in the middle, and a right-hand detail panel for installing the selected skill — individually or in batch — into any configured agent.
+
+## How It Works
+
+```text
+Git repos in one workspace
+        |
+        | scan SKILL.md folders
+        v
+SkillDock inventory
+        |
+        | create / remove safe symlinks
+        v
+Claude Code, Codex, or custom agent skill directories
+```
+
+Example layout:
+
+```text
+~/AgentSkills/
+├── awesome-claude-skills/       # git clone
+├── personal-agent-skills/       # your own Git repo
+└── .skilldock/config.json       # workspace metadata
+
+~/.claude/skills/code-review -> ~/AgentSkills/personal-agent-skills/code-review
+~/.codex/skills/code-review  -> ~/AgentSkills/personal-agent-skills/code-review
+```
 
 ## Core Capabilities
 
@@ -145,6 +193,8 @@ Principle: **the filesystem and Git are the source of truth.** Config only store
 ## Documentation
 
 - [Contributing guide](CONTRIBUTING.md) — branch workflow, required CI checks, release procedure
+- [Security policy](SECURITY.md) — safety model and vulnerability reporting
+- [GitHub discovery plan](docs/GITHUB_DISCOVERY.md) — description, topics, and launch copy for improving repository visibility
 - [Release procedure](docs/RELEASING.md) — tagging, macOS codesign / notarize, Tauri updater signing
 - [Product & architecture design](docs/skilldock.md) (Chinese)
 - [Implementation plan](docs/skilldock-implementation-plan.md) (Chinese)
