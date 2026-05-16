@@ -22,6 +22,7 @@ export const CoreView = React.memo(function CoreView({
   onBatchLinkResult,
   onOperationResult,
   onWorkspaceChange,
+  onThemePreferenceChange,
   onTaskChange,
   onOpenTaskLog,
   onPullAll,
@@ -41,6 +42,7 @@ export const CoreView = React.memo(function CoreView({
   onBatchLinkResult: (result: BatchLinkOperationResult) => void;
   onOperationResult: (result: TaskOperationResult) => void;
   onWorkspaceChange: (workspace: Workspace, message: string) => void;
+  onThemePreferenceChange: (theme: "dark" | "light" | "system") => void;
   onTaskChange: (task: TaskRecord) => void;
   onOpenTaskLog: (taskId: string) => void;
   onPullAll: (autostash: boolean) => void;
@@ -92,7 +94,11 @@ export const CoreView = React.memo(function CoreView({
         <TasksView focusedTaskId={focusedTaskId} onTaskChange={onTaskChange} tasks={taskHistory} />
       )}
       {activeView === "Settings" && (
-        <SettingsView onWorkspaceChange={onWorkspaceChange} workspace={workspace} />
+        <SettingsView
+          onThemePreferenceChange={onThemePreferenceChange}
+          onWorkspaceChange={onWorkspaceChange}
+          workspace={workspace}
+        />
       )}
     </>
   );

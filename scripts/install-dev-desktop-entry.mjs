@@ -3,6 +3,25 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
+function commandExists(command) {
+  const result = spawnSync(command, ["--version"], { stdio: "ignore" });
+  return result.status === 0;
+}
+
+if (!commandExists("cargo")) {
+  console.error(`Missing Rust toolchain: SkillDock's Tauri dev mode requires cargo on PATH.
+
+Install Rust with rustup, then restart your terminal:
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+After installation, verify:
+  cargo --version
+
+Then rerun:
+  npm run tauri:dev`);
+  process.exit(1);
+}
+
 const appId = "dev.skilldock.app";
 const fallbackId = "skilldock";
 const root = process.cwd();

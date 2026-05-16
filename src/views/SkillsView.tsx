@@ -142,8 +142,8 @@ export const SkillsView = memo(function SkillsView({
     () => Array.from(new Set(skills.map((skill) => skill.sourceProjectId))).sort(),
     [skills],
   );
-  // Counts per project and per install-status so the filter dropdowns can
-  // communicate their discriminating power (matches ProjectsView behaviour).
+  // Counts per project and install presence so the filter dropdowns communicate
+  // only the user-facing choices.
   const projectCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const skill of skills) {
@@ -154,18 +154,14 @@ export const SkillsView = memo(function SkillsView({
   const installStatusCounts = useMemo(() => {
     let installed = 0;
     let notInstalled = 0;
-    const byStatus = new Map<string, number>();
     for (const skill of skills) {
       if (skill.installedAgents.length > 0) {
         installed += 1;
-        for (const install of skill.installedAgents) {
-          byStatus.set(install.status, (byStatus.get(install.status) ?? 0) + 1);
-        }
       } else {
         notInstalled += 1;
       }
     }
-    return { installed, notInstalled, byStatus };
+    return { installed, notInstalled };
   }, [skills]);
   const filteredSkills = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -174,11 +170,6 @@ export const SkillsView = memo(function SkillsView({
       if (projectFilter !== "all" && skill.sourceProjectId !== projectFilter) return false;
       if (agentFilter === "installed" && !installed) return false;
       if (agentFilter === "not-installed" && installed) return false;
-      if (
-        !["all", "installed", "not-installed"].includes(agentFilter) &&
-        !skill.installedAgents.some((install) => install.status === agentFilter)
-      )
-        return false;
       if (!normalizedQuery) return true;
       return [skill.name, skill.description, skill.relativePath, skill.absolutePath]
         .filter(Boolean)
@@ -382,22 +373,10 @@ export const SkillsView = memo(function SkillsView({
           <label>
             <span>Install status</span>
             <select onChange={(event) => setAgentFilter(event.target.value)} value={agentFilter}>
-              <option value="all">All statuses ({skills.length})</option>
+              <option value="all">All ({skills.length})</option>
               <option value="installed">Installed ({installStatusCounts.installed})</option>
               <option value="not-installed">
                 Not installed ({installStatusCounts.notInstalled})
-              </option>
-              <option value="valid">
-                Valid ({installStatusCounts.byStatus.get("valid") ?? 0})
-              </option>
-              <option value="broken">
-                Broken ({installStatusCounts.byStatus.get("broken") ?? 0})
-              </option>
-              <option value="external">
-                External ({installStatusCounts.byStatus.get("external") ?? 0})
-              </option>
-              <option value="conflict">
-                Conflict ({installStatusCounts.byStatus.get("conflict") ?? 0})
               </option>
             </select>
           </label>
@@ -405,7 +384,7 @@ export const SkillsView = memo(function SkillsView({
         <VirtualList
           className="table-list skill-list"
           empty={<p className="batch-message">No skills match the current filters.</p>}
-          estimateSize={92}
+          estimateSize={76}
           itemKey={(skill) => skill.id}
           items={filteredSkills}
           renderItem={(skill) => {

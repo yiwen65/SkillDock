@@ -6,7 +6,7 @@ import {
   scanWorkspace,
   selectWorkspace,
 } from "../lib/commands";
-import { PanelHeader, errorMessage } from "../lib/shared";
+import { PanelHeader, errorMessage, type ThemePreference } from "../lib/shared";
 import type { AgentProfile, UserConfig, Workspace } from "../lib/types";
 
 function clampAutomaticCheckInterval(value: number) {
@@ -76,9 +76,11 @@ function validateProfileDrafts(profiles: AgentProfile[]) {
 }
 
 export const SettingsView = memo(function SettingsView({
+  onThemePreferenceChange,
   onWorkspaceChange,
   workspace,
 }: {
+  onThemePreferenceChange: (theme: ThemePreference) => void;
   onWorkspaceChange: (workspace: Workspace, message: string) => void;
   workspace: Workspace;
 }) {
@@ -121,6 +123,17 @@ export const SettingsView = memo(function SettingsView({
     setConfig(update(config));
   };
 
+  const updateThemePreference = (theme: ThemePreference) => {
+    updateConfig((current) => ({
+      ...current,
+      uiPreferences: {
+        ...current.uiPreferences,
+        theme,
+      },
+    }));
+    onThemePreferenceChange(theme);
+  };
+
   const saveGeneralSettings = async () => {
     if (!config) return;
     if (busyRef.current) return;
@@ -138,6 +151,7 @@ export const SettingsView = memo(function SettingsView({
     try {
       const saved = await patchUserPreferences(patch);
       setConfig(saved);
+      onThemePreferenceChange(saved.uiPreferences.theme);
       setMessage("Settings saved.");
     } catch (error) {
       setMessage(errorMessage(error));
@@ -278,15 +292,7 @@ export const SettingsView = memo(function SettingsView({
           <label>
             <span>Theme</span>
             <select
-              onChange={(event) =>
-                updateConfig((current) => ({
-                  ...current,
-                  uiPreferences: {
-                    ...current.uiPreferences,
-                    theme: event.target.value as UserConfig["uiPreferences"]["theme"],
-                  },
-                }))
-              }
+              onChange={(event) => updateThemePreference(event.target.value as ThemePreference)}
               value={config.uiPreferences.theme}
             >
               <option value="system">System</option>

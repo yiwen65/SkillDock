@@ -608,6 +608,7 @@ function App() {
                 onBatchLinkResult={applyBatchLinkResult}
                 onOperationResult={applyOperationResult}
                 onWorkspaceChange={applyWorkspaceChange}
+                onThemePreferenceChange={setThemePreference}
                 onTaskChange={updateTaskRecord}
                 onSetProjectHidden={setProjectHidden}
                 onDeleteProject={deleteProjectHandler}
