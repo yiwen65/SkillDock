@@ -1,12 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { previewUnlinkSkill, saveAgentProfiles, scanWorkspace, unlinkSkill } from "../lib/commands";
 import { EmptyState, PanelHeader, errorMessage } from "../lib/shared";
-import type {
-  AgentProfileState,
-  Skill,
-  TaskOperationResult,
-  Workspace,
-} from "../lib/types";
+import type { AgentProfileState, Skill, TaskOperationResult, Workspace } from "../lib/types";
 
 type LinkedProfileSkill = {
   linkName: string;
