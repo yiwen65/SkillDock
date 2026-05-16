@@ -1872,7 +1872,36 @@ textarea::placeholder {
   font-weight: 700;
 }
 
-.settings-profiles,
+.catalog-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.catalog-stat-grid > div,
+.catalog-list {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--color-row-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--color-surface-subtle);
+}
+
+.catalog-stat-grid strong {
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.catalog-list span:not(.setting-label) {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-message {
   grid-column: 1 / -1;
 }
@@ -1901,7 +1930,7 @@ textarea::placeholder {
 
 .settings-profile-row {
   display: grid;
-  grid-template-columns: minmax(110px, 0.55fr) minmax(130px, 0.65fr) minmax(200px, 1fr) auto auto;
+  grid-template-columns: minmax(130px, 0.65fr) minmax(200px, 1fr) auto auto;
   gap: 10px;
   align-items: end;
   border: 1px solid var(--color-row-border);

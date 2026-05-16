@@ -1,4 +1,5 @@
 mod agents;
+mod catalog;
 mod config;
 mod git_ops;
 mod links;
@@ -8,6 +9,7 @@ mod tasks;
 mod workspace;
 
 pub use agents::*;
+pub use catalog::*;
 pub use config::*;
 pub use git_ops::*;
 pub use links::*;
@@ -62,6 +64,12 @@ pub fn run() {
             get_task_logs_command,
             recent_task_records_command,
             cancel_task_command,
+            load_workspace_catalog_summary_command,
+            sync_workspace_catalog_from_projects_command,
+            restore_missing_catalog_repositories_command,
+            initialize_catalog_git_sync_command,
+            pull_catalog_git_sync_command,
+            publish_catalog_git_sync_command,
             import_project_command,
             delete_project_command,
             check_project_updates_command,

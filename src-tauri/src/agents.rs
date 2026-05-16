@@ -125,6 +125,28 @@ pub fn create_agent_profile_dir_at(
     scan_workspace_at(workspace_root, &config.agent_profiles).map_err(AgentProfileError::workspace)
 }
 
+pub fn create_agent_profile_dir_for_profile_at(
+    workspace_root: impl AsRef<Path>,
+    user_config_path: impl AsRef<Path>,
+    profile: &AgentProfile,
+    resolved_skills_dir: Option<&str>,
+    confirmed: bool,
+) -> Result<Workspace, AgentProfileError> {
+    let config =
+        load_user_config_at(user_config_path.as_ref()).map_err(AgentProfileError::config)?;
+    validate_agent_profiles(&config.agent_profiles)?;
+    let persisted_profile =
+        resolve_agent_profile(&config.agent_profiles, profile, resolved_skills_dir)?;
+    let skills_dir = expand_home(&persisted_profile.skills_dir);
+
+    if !confirmed {
+        return Err(AgentProfileError::confirmation_required(&skills_dir));
+    }
+
+    fs::create_dir_all(&skills_dir).map_err(|error| AgentProfileError::io(&skills_dir, error))?;
+    scan_workspace_at(workspace_root, &config.agent_profiles).map_err(AgentProfileError::workspace)
+}
+
 pub fn default_install_targets(agent_profiles: &[AgentProfile]) -> Vec<AgentProfile> {
     agent_profiles
         .iter()
@@ -150,13 +172,15 @@ pub fn save_agent_profiles_command(
 #[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn create_agent_profile_dir_command(
     workspace_root: String,
-    profile_id: String,
+    profile: AgentProfile,
+    resolved_skills_dir: String,
     confirmed: bool,
 ) -> Result<Workspace, AgentProfileError> {
-    create_agent_profile_dir_at(
+    create_agent_profile_dir_for_profile_at(
         workspace_root,
         default_user_config_path(),
-        &profile_id,
+        &profile,
+        Some(&resolved_skills_dir),
         confirmed,
     )
 }
@@ -218,6 +242,49 @@ fn validate_agent_profiles(profiles: &[AgentProfile]) -> Result<(), AgentProfile
     }
 
     Ok(())
+}
+
+fn resolve_agent_profile<'a>(
+    profiles: &'a [AgentProfile],
+    requested: &AgentProfile,
+    resolved_skills_dir: Option<&str>,
+) -> Result<&'a AgentProfile, AgentProfileError> {
+    if let Some(profile) = profiles
+        .iter()
+        .find(|profile| profile.id == requested.id)
+    {
+        return Ok(profile);
+    }
+
+    if let Some(profile) = profiles.iter().find(|profile| {
+        skills_dirs_match(&profile.skills_dir, &requested.skills_dir)
+            || resolved_skills_dir
+                .filter(|skills_dir| !skills_dir.trim().is_empty())
+                .is_some_and(|skills_dir| skills_dirs_match(&profile.skills_dir, skills_dir))
+    }) {
+        return Ok(profile);
+    }
+
+    let mut matching_names = profiles
+        .iter()
+        .filter(|profile| profile.name.trim() == requested.name.trim());
+    if let Some(profile) = matching_names.next() {
+        if matching_names.next().is_none() {
+            return Ok(profile);
+        }
+    }
+
+    Err(AgentProfileError::profile_not_found(&requested.id))
+}
+
+fn skills_dirs_match(left: &str, right: &str) -> bool {
+    normalize_skills_dir_for_compare(left) == normalize_skills_dir_for_compare(right)
+        || normalize_expanded_skills_dir_for_compare(left)
+            == normalize_expanded_skills_dir_for_compare(right)
+}
+
+fn normalize_expanded_skills_dir_for_compare(path: &str) -> String {
+    normalize_skills_dir_for_compare(&expand_home(path).display().to_string())
 }
 
 fn is_valid_profile_id(id: &str) -> bool {

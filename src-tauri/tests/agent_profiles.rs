@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use skilldock_lib::{
-    create_agent_profile_dir_at, default_install_targets, list_agent_profile_states_at,
-    save_agent_profiles_at, AgentProfile, AgentProfileErrorKind, LinkMode, UserConfig,
+    create_agent_profile_dir_at, create_agent_profile_dir_for_profile_at, default_install_targets,
+    list_agent_profile_states_at, save_agent_profiles_at, AgentProfile, AgentProfileErrorKind,
+    LinkMode, UserConfig,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -80,6 +81,38 @@ fn saves_valid_profiles_lists_states_creates_missing_dirs_only_when_confirmed() 
         .agent_profiles
         .iter()
         .find(|state| state.profile.id == "disabled-agent")
+        .unwrap();
+    assert!(created.exists);
+    assert!(created.writable);
+    assert!(missing_dir.is_dir());
+}
+
+#[test]
+fn creates_missing_dir_from_profile_snapshot_when_profile_id_changed() {
+    let workspace_root = temp_dir("agent_profiles_snapshot_workspace");
+    let config_path = temp_dir("agent_profiles_snapshot_config").join("config.json");
+    let missing_dir = temp_dir("agent_profiles_snapshot_parent")
+        .join("kiro")
+        .join("skills");
+
+    let persisted_profile = profile("custom-kiro", "Kiro", &missing_dir, true);
+    save_agent_profiles_at(&config_path, vec![persisted_profile]).unwrap();
+
+    let requested_profile = profile("kiro", "Kiro", &missing_dir, true);
+    let resolved_skills_dir = missing_dir.display().to_string();
+    let workspace = create_agent_profile_dir_for_profile_at(
+        &workspace_root,
+        &config_path,
+        &requested_profile,
+        Some(&resolved_skills_dir),
+        true,
+    )
+    .unwrap();
+
+    let created = workspace
+        .agent_profiles
+        .iter()
+        .find(|state| state.profile.id == "custom-kiro")
         .unwrap();
     assert!(created.exists);
     assert!(created.writable);

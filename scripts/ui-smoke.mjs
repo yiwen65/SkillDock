@@ -141,6 +141,8 @@ try {
   const appModule = await server.ssrLoadModule("/src/App.tsx");
   const { default: App, WorkspaceSelector } = appModule;
   const { CoreView } = await server.ssrLoadModule("/src/CoreView.tsx");
+  const { catalogActionState, normalizeProfileDrafts, validateProfileDrafts } =
+    await server.ssrLoadModule("/src/views/SettingsView.tsx");
   const { buildLatestProjectErrorIndex } = await server.ssrLoadModule(
     "/src/views/ProjectsView.tsx",
   );
@@ -189,6 +191,90 @@ try {
 
   const app = render(React.createElement(App));
   assertContains(app, 'src="/app-icon.png"', "app shell brand icon");
+
+  const unsyncedCatalogActions = catalogActionState({
+    busy: false,
+    catalog: {
+      activeCount: 1,
+      catalogPath: "/tmp/skilldock-smoke/.skilldock/catalog",
+      gitSyncAvailable: true,
+      localOnly: [],
+      localOnlyCount: 0,
+      missing: [],
+      missingCount: 0,
+      repositories: [],
+    },
+    catalogRestorePending: false,
+    catalogRemoteDraft: "",
+    workspaceRoot: workspace.root,
+  });
+  assert.equal(
+    unsyncedCatalogActions.publishListDisabled,
+    true,
+    "publish should stay disabled until a catalog remote is configured",
+  );
+  assert.equal(
+    unsyncedCatalogActions.pullListDisabled,
+    true,
+    "pull should stay disabled until a catalog remote is configured",
+  );
+
+  const syncedCatalogActions = catalogActionState({
+    busy: false,
+    catalog: {
+      activeCount: 1,
+      catalogPath: "/tmp/skilldock-smoke/.skilldock/catalog",
+      gitRemote: "https://github.com/example/skilldock-catalog.git",
+      gitSyncAvailable: true,
+      localOnly: [],
+      localOnlyCount: 0,
+      missing: [{ directoryName: "project-one", id: "project-one", remoteUrl: "https://..." }],
+      missingCount: 1,
+      repositories: [],
+    },
+    catalogRestorePending: false,
+    catalogRemoteDraft: "https://github.com/example/skilldock-catalog.git",
+    workspaceRoot: workspace.root,
+  });
+  assert.equal(syncedCatalogActions.publishListDisabled, false);
+  assert.equal(syncedCatalogActions.pullListDisabled, false);
+  assert.equal(syncedCatalogActions.cloneMissingDisabled, false);
+
+  const pendingRestoreCatalogActions = catalogActionState({
+    busy: false,
+    catalog: {
+      activeCount: 1,
+      catalogPath: "/tmp/skilldock-smoke/.skilldock/catalog",
+      gitRemote: "https://github.com/example/skilldock-catalog.git",
+      gitSyncAvailable: true,
+      localOnly: [],
+      localOnlyCount: 0,
+      missing: [{ directoryName: "project-one", id: "project-one", remoteUrl: "https://..." }],
+      missingCount: 1,
+      repositories: [],
+    },
+    catalogRestorePending: true,
+    catalogRemoteDraft: "https://github.com/example/skilldock-catalog.git",
+    workspaceRoot: workspace.root,
+  });
+  assert.equal(
+    pendingRestoreCatalogActions.cloneMissingDisabled,
+    true,
+    "clone missing should stay disabled while a restore task is already queued",
+  );
+
+  const normalizedProfiles = normalizeProfileDrafts([
+    {
+      id: "",
+      name: "Custom Agent",
+      skillsDir: "/tmp/custom-agent/skills",
+      enabled: true,
+      builtIn: false,
+      linkMode: "symlink",
+    },
+  ]);
+  assert.equal(normalizedProfiles[0].id, "custom-agent");
+  assert.equal(validateProfileDrafts(normalizedProfiles), null);
 
   const selector = render(
     React.createElement(WorkspaceSelector, {
@@ -242,6 +328,55 @@ try {
   assertContains(projects, "skill</small>", "scan/project smoke");
   assertContains(projects, "Pull available", "scan/project smoke");
   assertExcludes(projects, "license: LICENSE", "scan/project smoke");
+
+  const missingAgentWorkspace = {
+    ...workspace,
+    agentProfiles: [
+      ...workspace.agentProfiles,
+      {
+        profile: {
+          id: "kiro",
+          name: "Kiro",
+          skillsDir: "~/.kiro/skills",
+          enabled: true,
+          builtIn: false,
+          linkMode: "symlink",
+        },
+        skillsDir: "/tmp/skilldock-smoke-kiro",
+        exists: false,
+        writable: false,
+        symlinkCount: 0,
+        workspaceLinkCount: 0,
+        entries: [],
+      },
+    ],
+  };
+  const agentsWithMissingDir = render(
+    React.createElement(CoreView, {
+      ...coreProps,
+      activeView: "Agents",
+      workspace: missingAgentWorkspace,
+    }),
+  );
+  assertContains(agentsWithMissingDir, "Create directory", "missing agent directory smoke");
+
+  const agentsAfterDirCreate = render(
+    React.createElement(CoreView, {
+      ...coreProps,
+      activeView: "Agents",
+      workspace: {
+        ...missingAgentWorkspace,
+        agentProfiles: missingAgentWorkspace.agentProfiles.map((state) =>
+          state.profile.id === "kiro" ? { ...state, exists: true, writable: true } : state,
+        ),
+      },
+    }),
+  );
+  assertExcludes(
+    agentsAfterDirCreate,
+    "Create directory",
+    "created agent directory smoke",
+  );
 
   const projectCount = 50000;
   const largeProjectTask = {

@@ -130,6 +130,21 @@ User app config：
 - metadata 只存用户偏好、覆盖值和缓存信息。
 - agent 安装状态从 agent 目标目录中的软链接实时反查。
 
+Repository catalog：
+
+```text
+<workspace>/.skilldock/catalog/repos/*.json
+<workspace>/.skilldock/catalog/tombstones/*.json
+```
+
+用于跨设备同步 collection 中“应该存在”的 Git 仓库列表。catalog 是可迁移的期望状态，不替代本地扫描：
+
+- 每个仓库一个 JSON 文件，避免多设备同时新增仓库时产生大 JSON 冲突。
+- 记录 remote URL、目录名、启用/移除状态和导入选项。
+- 新设备拉取 catalog 后，应用对比本地 workspace，展示缺失仓库并支持批量 clone。
+- 删除共享列表中的仓库应写入 tombstone；其他设备不自动删除本地 clone，只提示用户确认。
+- workspace 根目录可以初始化为一个只跟踪 `.skilldock/catalog` 的 Git 仓库；顶层项目仓库继续作为独立 Git 仓库存在。
+
 ## 导入仓库
 
 MVP 支持：

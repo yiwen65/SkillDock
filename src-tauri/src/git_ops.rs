@@ -1035,7 +1035,7 @@ fn infer_directory_name(remote_url: &str) -> Result<String, GitOperationError> {
     safe_project_dir_name(name)
 }
 
-fn safe_project_dir_name(name: &str) -> Result<String, GitOperationError> {
+pub(crate) fn safe_project_dir_name(name: &str) -> Result<String, GitOperationError> {
     let name = name.trim();
     if name.is_empty()
         || name == "."
@@ -1063,7 +1063,7 @@ fn is_git_repository(path: &Path) -> bool {
             .unwrap_or(false)
 }
 
-fn clone_with_retries(
+pub(crate) fn clone_with_retries(
     path: &Path,
     target_path: &Path,
     args: &[String],
@@ -1099,7 +1099,7 @@ fn clone_with_retries(
     Err((combined_stdout, combined_stderr))
 }
 
-fn git_command_output_with_timeout(
+pub(crate) fn git_command_output_with_timeout(
     path: &Path,
     args: &[String],
     timeout: Duration,

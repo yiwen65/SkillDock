@@ -321,7 +321,9 @@ function App() {
 
   const refreshWorkspaceAfterTerminalProjectTask = async (record: TaskRecord) => {
     if (
-      !["fetch_project", "pull_project", "sync_all_projects"].includes(record.kind) ||
+      !["fetch_project", "pull_project", "sync_all_projects", "restore_catalog"].includes(
+        record.kind,
+      ) ||
       !record.workspaceRoot ||
       !isTerminalTaskStatus(record.status) ||
       workspaceRefreshTaskIdsRef.current.has(record.id)
@@ -391,16 +393,14 @@ function App() {
     }
     const workspace = readyWorkspaceRef.current;
 
-    const confirmed = window.confirm(
-      `Create skills directory for ${profile.profile.name}?\n\n${profile.skillsDir}`,
-    );
-    if (!confirmed) {
-      return;
-    }
-
     setOperationMessage(`Creating ${profile.profile.name} directory...`);
     try {
-      const nextWorkspace = await createAgentProfileDir(workspace.root, profile.profile.id, true);
+      const nextWorkspace = await createAgentProfileDir(
+        workspace.root,
+        profile.profile,
+        profile.skillsDir,
+        true,
+      );
       if (!isCurrentWorkspaceRoot(workspace.root)) {
         return;
       }
@@ -412,6 +412,7 @@ function App() {
       }
       setOperationMessage(errorMessage(error));
       setTrackedLoadState({ status: "error", message: errorMessage(error), workspace });
+      throw error;
     }
   }, []);
 

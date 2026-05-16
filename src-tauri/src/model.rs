@@ -392,6 +392,8 @@ pub enum TaskKind {
     ScanWorkspace,
     ImportProject,
     DeleteProject,
+    RestoreCatalog,
+    SyncCatalog,
     FetchProject,
     PullProject,
     SyncAllProjects,
