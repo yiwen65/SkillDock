@@ -1,7 +1,7 @@
 {
   "name": "skilldock",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Local-first Git workspace and symlink installer for AI agent skills across Claude Code, Codex, and custom agents.",
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",

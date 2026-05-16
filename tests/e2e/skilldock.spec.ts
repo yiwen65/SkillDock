@@ -196,6 +196,7 @@ test("covers task logs and settings persistence", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Preferences" })).toBeVisible();
+  await expectAgentProfilesToAvoidHorizontalOverflow(page);
   await page.getByLabel("Project sort").selectOption("updated");
   // The interval field is only rendered when "Enable automatic checks" is
   // on, and its unit switched from minutes to days (intervalMinutes patch
@@ -307,6 +308,38 @@ async function expectSkillListToFillPanel(page: Page) {
     }
 
     return nextFindings;
+  });
+
+  expect(findings).toEqual([]);
+}
+
+async function expectAgentProfilesToAvoidHorizontalOverflow(page: Page) {
+  const findings = await page.locator(".settings-profiles").evaluate((panel) => {
+    const profilePanel = panel as HTMLElement;
+    const panelRect = profilePanel.getBoundingClientRect();
+    const rows = [...profilePanel.querySelectorAll(".settings-profile-row")] as HTMLElement[];
+    const tolerance = 1;
+    const rowFindings = rows.flatMap((row, index) => {
+      const rect = row.getBoundingClientRect();
+      const messages: string[] = [];
+      if (row.scrollWidth > row.clientWidth + tolerance) {
+        messages.push(
+          `profile row ${index} scrollWidth ${row.scrollWidth} exceeds ${row.clientWidth}`,
+        );
+      }
+      if (rect.right > panelRect.right + tolerance) {
+        messages.push(`profile row ${index} extends ${rect.right - panelRect.right}px past panel`);
+      }
+      return messages;
+    });
+
+    if (profilePanel.scrollWidth > profilePanel.clientWidth + tolerance) {
+      rowFindings.push(
+        `profile panel scrollWidth ${profilePanel.scrollWidth} exceeds ${profilePanel.clientWidth}`,
+      );
+    }
+
+    return rowFindings;
   });
 
   expect(findings).toEqual([]);

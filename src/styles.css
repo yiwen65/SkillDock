@@ -1233,6 +1233,7 @@ h2 {
 .filter-bar input,
 .filter-bar select {
   width: 100%;
+  min-width: 0;
   min-height: 44px;
   border: 1px solid var(--color-border-strong);
   border-radius: 999px;
@@ -1940,6 +1941,7 @@ textarea::placeholder {
 .settings-profile-list {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .recent-workspace-list .text-button {
@@ -1948,13 +1950,30 @@ textarea::placeholder {
 
 .settings-profile-row {
   display: grid;
-  grid-template-columns: minmax(130px, 0.65fr) minmax(200px, 1fr) auto auto;
+  grid-template-columns: minmax(96px, 0.7fr) minmax(140px, 1fr) auto;
   gap: 10px;
   align-items: end;
+  min-width: 0;
   border: 1px solid var(--color-row-border);
   border-radius: 18px;
   padding: 10px;
   background: var(--color-surface-subtle);
+}
+
+.settings-profile-row > label {
+  min-width: 0;
+}
+
+.settings-profile-row > .inline-check {
+  justify-self: start;
+}
+
+.settings-profile-row > button {
+  justify-self: start;
+}
+
+.settings-profile-row > .secondary-button {
+  grid-column: 1 / -1;
 }
 
 .setting-row {
