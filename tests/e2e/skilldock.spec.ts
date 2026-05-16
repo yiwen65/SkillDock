@@ -153,9 +153,7 @@ test("covers agent profile creation, missing directory creation and safe unlink"
 
   await expect(page.getByRole("heading", { name: "Agents" }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Missing Agent" })).toBeVisible();
-  await page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Create directory" }).click();
-  await expect(page.getByText("Missing Agent directory created.")).toBeVisible();
   // After the directory exists the Create-directory button disappears from
   // the row (the button is conditionally rendered on !state.exists). Assert
   // that behavioural fact rather than the old textual "exists" badge, which
@@ -163,17 +161,22 @@ test("covers agent profile creation, missing directory creation and safe unlink"
   const missingAgentRow = page.locator(".agent-row").filter({ hasText: "Missing Agent" });
   await expect(missingAgentRow.getByRole("button", { name: "Create directory" })).toHaveCount(0);
 
-  await page.getByLabel("Profile id").fill("aider");
-  await page.getByLabel("Name").fill("Aider");
-  await page.getByLabel("Skills directory").fill("/tmp/e2e-aider");
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(page.getByRole("status")).toContainText("Aider saved.");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Add profile" }).click();
+  const aiderProfileRow = page.locator(".settings-profile-row").last();
+  await aiderProfileRow.getByLabel("Name").fill("Aider");
+  await aiderProfileRow.getByLabel("Skills directory").fill("/tmp/e2e-aider");
+  await page.getByRole("button", { name: "Save profiles" }).click();
+  await expect(page.getByRole("status")).toContainText("Agent profiles saved.");
+  await page.getByRole("button", { name: "Agents" }).click();
   await expect(page.getByRole("heading", { name: "Aider" })).toBeVisible();
 
   // Uninstall flow: the earlier "Preview uninstall → Execute uninstall"
   // two-step UI was collapsed into a single "Uninstall" button in each
   // linked-skill row. In the mock, only TDD is linked (into Codex), so
   // .first() unambiguously hits that row's Uninstall control.
+  const codexAgentRow = page.locator(".agent-row").filter({ hasText: "Codex" });
+  await codexAgentRow.getByRole("button", { name: /linked skills for Codex/ }).click();
   await page.getByRole("button", { name: "Uninstall", exact: true }).first().click();
   await expect(page.getByRole("status")).toContainText("Unlinked agent-skills-tdd from Codex.");
   await expect(page.getByText("No workspace skills linked.").first()).toBeVisible();
@@ -895,7 +898,14 @@ function mockTauriBridge() {
           return { task: clone(task), workspace: clone(workspace) };
         }
         case "create_agent_profile_dir_command": {
-          const state = findProfile(args.profileId);
+          const requestedProfile = args.profile as AgentProfile;
+          const state =
+            workspace.agentProfiles.find(
+              (profile) =>
+                profile.profile.id === requestedProfile.id ||
+                profile.skillsDir === args.resolvedSkillsDir ||
+                profile.profile.skillsDir === requestedProfile.skillsDir,
+            ) ?? findProfile(requestedProfile.id);
           state.exists = true;
           state.writable = true;
           return clone(workspace);

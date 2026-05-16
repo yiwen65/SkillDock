@@ -372,11 +372,7 @@ try {
       },
     }),
   );
-  assertExcludes(
-    agentsAfterDirCreate,
-    "Create directory",
-    "created agent directory smoke",
-  );
+  assertExcludes(agentsAfterDirCreate, "Create directory", "created agent directory smoke");
 
   const projectCount = 50000;
   const largeProjectTask = {
