@@ -22,6 +22,13 @@ fn emit_task_update(record: &TaskRecord) {
     }
 }
 
+fn notify_task_update(record: &TaskRecord) {
+    #[cfg(feature = "desktop")]
+    emit_task_update(record);
+    #[cfg(not(feature = "desktop"))]
+    let _ = record;
+}
+
 type TaskJob = Box<dyn FnOnce(&mut TaskContext) -> TaskOutcome + Send + 'static>;
 
 pub const TASK_LOG_MAX_BYTES: usize = 64 * 1024;
@@ -47,13 +54,24 @@ struct TaskQueueState {
     queued: VecDeque<QueuedTask>,
 }
 
-#[derive(Default)]
 pub struct TaskQueue {
     state: Mutex<TaskQueueState>,
     runner: Mutex<()>,
+    publish_progress: bool,
+}
+
+impl Default for TaskQueue {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(TaskQueueState::default()),
+            runner: Mutex::new(()),
+            publish_progress: false,
+        }
+    }
 }
 
 pub struct TaskContext {
+    task_id: Option<String>,
     cancel_requested: Arc<AtomicBool>,
     stdout: String,
     stderr: String,
@@ -74,12 +92,24 @@ impl TaskContext {
         if !self.stdout.ends_with('\n') {
             append_bounded_log(&mut self.stdout, "\n");
         }
+        if let Some(task_id) = self.task_id.as_deref() {
+            task_queue().append_task_stdout(task_id, line.as_ref());
+        }
     }
 
     pub fn stderr(&mut self, line: impl AsRef<str>) {
         append_bounded_log(&mut self.stderr, line.as_ref());
         if !self.stderr.ends_with('\n') {
             append_bounded_log(&mut self.stderr, "\n");
+        }
+        if let Some(task_id) = self.task_id.as_deref() {
+            task_queue().append_task_stderr(task_id, line.as_ref());
+        }
+    }
+
+    pub fn set_summary(&mut self, summary: impl AsRef<str>) {
+        if let Some(task_id) = self.task_id.as_deref() {
+            task_queue().update_task_summary(task_id, summary.as_ref());
         }
     }
 }
@@ -203,7 +233,7 @@ impl TaskQueue {
 
     pub fn run_next(&self) -> Option<TaskRecord> {
         let _runner = self.runner.lock().expect("task queue runner lock poisoned");
-        let task = {
+        let (task, running_record) = {
             let mut state = self.state.lock().expect("task queue state lock poisoned");
             let task = state.queued.pop_front()?;
             let record = state
@@ -222,10 +252,13 @@ impl TaskQueue {
                 return Some(record);
             }
             record.status = TaskStatus::Running;
-            Some(task)
+            let record = record.clone();
+            Some((task, record))
         }?;
+        notify_task_update(&running_record);
 
         let mut context = TaskContext {
+            task_id: self.publish_progress.then(|| task.id.clone()),
             cancel_requested: Arc::clone(&task.cancel_requested),
             stdout: String::new(),
             stderr: String::new(),
@@ -265,6 +298,46 @@ impl TaskQueue {
             record.summary = "Task cancelled before it started.".to_string();
         }
         Some(record.clone())
+    }
+
+    fn append_task_stdout(&self, id: &str, line: &str) {
+        self.append_task_output(id, line, true);
+    }
+
+    fn append_task_stderr(&self, id: &str, line: &str) {
+        self.append_task_output(id, line, false);
+    }
+
+    fn append_task_output(&self, id: &str, line: &str, stdout: bool) {
+        let record = {
+            let mut state = self.state.lock().expect("task queue state lock poisoned");
+            let Some(record) = state.records.iter_mut().find(|record| record.id == id) else {
+                return;
+            };
+            let target = if stdout {
+                &mut record.stdout
+            } else {
+                &mut record.stderr
+            };
+            append_bounded_log(target, line);
+            if !target.ends_with('\n') {
+                append_bounded_log(target, "\n");
+            }
+            record.clone()
+        };
+        notify_task_update(&record);
+    }
+
+    fn update_task_summary(&self, id: &str, summary: &str) {
+        let record = {
+            let mut state = self.state.lock().expect("task queue state lock poisoned");
+            let Some(record) = state.records.iter_mut().find(|record| record.id == id) else {
+                return;
+            };
+            record.summary = summary.to_string();
+            record.clone()
+        };
+        notify_task_update(&record);
     }
 
     pub fn get_task_status(&self, id: &str) -> Option<TaskRecord> {
@@ -333,8 +406,7 @@ impl TaskQueue {
         record.project_outcomes = outcome.project_outcomes;
         let record = record.clone();
         prune_completed_records(&mut state);
-        #[cfg(feature = "desktop")]
-        emit_task_update(&record);
+        notify_task_update(&record);
         record
     }
 }
@@ -446,7 +518,10 @@ fn truncate_log(log: &mut String) {
 static GLOBAL_TASK_QUEUE: OnceLock<TaskQueue> = OnceLock::new();
 
 pub fn task_queue() -> &'static TaskQueue {
-    GLOBAL_TASK_QUEUE.get_or_init(TaskQueue::default)
+    GLOBAL_TASK_QUEUE.get_or_init(|| TaskQueue {
+        publish_progress: true,
+        ..TaskQueue::default()
+    })
 }
 
 pub fn run_task_blocking<F>(kind: TaskKind, summary: impl Into<String>, job: F) -> TaskRecord

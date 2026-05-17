@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     is_pull_all_eligible, load_user_config, run_workspace_task_background,
-    run_workspace_task_blocking, scan_workspace_at, AgentProfile, ConfigError, GitStatus,
-    ImportProjectRequest, Project, ProjectTaskRecord, PullAllProjectsRequest, PullProjectRequest,
-    TaskKind, TaskOperationResult, TaskOutcome, TaskRecord, TaskStatus, Workspace, WorkspaceError,
+    run_workspace_task_blocking, scan_workspace_at, tombstone_catalog_project_at,
+    upsert_catalog_project_at, AgentProfile, ConfigError, GitStatus, ImportProjectRequest, Project,
+    ProjectTaskRecord, PullAllProjectsRequest, PullProjectRequest, TaskKind, TaskOperationResult,
+    TaskOutcome, TaskRecord, TaskStatus, Workspace, WorkspaceError,
 };
 
 const IMPORT_CLONE_MAX_ATTEMPTS: usize = 3;
@@ -256,12 +257,20 @@ fn run_import_project_task(
                             context,
                         ) {
                             Ok((stdout, stderr)) => {
-                                return TaskOutcome::succeeded(format!(
+                                let outcome = TaskOutcome::succeeded(format!(
                                     "Added {} to {}",
                                     skill_path, plan.directory_name
                                 ))
                                 .with_stdout(stdout)
                                 .with_stderr(stderr);
+                                return finalize_import_outcome(
+                                    outcome,
+                                    &workspace_root_for_task,
+                                    &profiles,
+                                    &result_workspace_for_task,
+                                    &plan.directory_name,
+                                    context,
+                                );
                             }
                             Err((stdout, stderr)) => {
                                 return TaskOutcome::failed(
@@ -319,15 +328,14 @@ fn run_import_project_task(
             }
         };
 
-        if matches!(outcome.status(), crate::TaskStatus::Succeeded) {
-            if let Ok(workspace) = scan_workspace_at(&workspace_root_for_task, &profiles) {
-                *result_workspace_for_task
-                    .lock()
-                    .expect("import result workspace lock poisoned") = Some(workspace);
-            }
-        }
-
-        outcome
+        finalize_import_outcome(
+            outcome,
+            &workspace_root_for_task,
+            &profiles,
+            &result_workspace_for_task,
+            &plan.directory_name,
+            context,
+        )
     };
 
     if background {
@@ -345,6 +353,55 @@ fn run_import_project_task(
             job,
         )
     }
+}
+
+fn finalize_import_outcome(
+    outcome: TaskOutcome,
+    workspace_root: &Path,
+    profiles: &[AgentProfile],
+    result_workspace_for_task: &Arc<Mutex<Option<Workspace>>>,
+    directory_name: &str,
+    context: &mut crate::TaskContext,
+) -> TaskOutcome {
+    if !matches!(outcome.status(), TaskStatus::Succeeded) {
+        return outcome;
+    }
+
+    match scan_workspace_at(workspace_root, profiles) {
+        Ok(workspace) => {
+            if let Some(project) = workspace
+                .projects
+                .iter()
+                .find(|project| project.id == directory_name)
+            {
+                match upsert_catalog_project_at(workspace_root, project) {
+                    Ok(true) => context.stdout(format!("catalog updated: {}", project.id)),
+                    Ok(false) => context.stdout(format!(
+                        "catalog unchanged: {} has no origin remote",
+                        project.id
+                    )),
+                    Err(error) => context.stderr(format!(
+                        "catalog update failed for {}: {}",
+                        project.id, error.message
+                    )),
+                }
+            } else {
+                context.stderr(format!(
+                    "catalog update skipped: imported project '{}' was not found after scan",
+                    directory_name
+                ));
+            }
+            *result_workspace_for_task
+                .lock()
+                .expect("import result workspace lock poisoned") = Some(workspace);
+        }
+        Err(error) => context.stderr(format!(
+            "catalog update skipped: workspace scan failed after import: {}",
+            error.message
+        )),
+    }
+
+    outcome
 }
 
 #[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
@@ -372,8 +429,9 @@ pub fn delete_project_at(
             message: format!("Project directory '{}' does not exist.", project_id),
         });
     }
-    let canonical_target = fs::canonicalize(&target_path)
-        .map_err(|e| GitOperationError::workspace(WorkspaceError::io(&target_path, e.to_string())))?;
+    let canonical_target = fs::canonicalize(&target_path).map_err(|e| {
+        GitOperationError::workspace(WorkspaceError::io(&target_path, e.to_string()))
+    })?;
     if !canonical_target.starts_with(&workspace_root) {
         return Err(GitOperationError::workspace(
             WorkspaceError::outside_workspace(&canonical_target),
@@ -385,18 +443,47 @@ pub fn delete_project_at(
     let result_workspace_for_task = Arc::clone(&result_workspace);
     let workspace_root_for_task = workspace_root.clone();
     let project_id_owned = project_id.to_string();
+    let project_before_delete = scan_workspace_at(&workspace_root, agent_profiles)
+        .ok()
+        .and_then(|workspace| {
+            workspace
+                .projects
+                .into_iter()
+                .find(|project| project.id == project_id)
+        });
 
     let task = run_workspace_task_blocking(
         workspace_root.display().to_string(),
         TaskKind::DeleteProject,
         format!("Delete {}", project_id_owned),
         move |context| {
-            context.stdout(format!("Removing directory: {}", canonical_target.display()));
+            context.stdout(format!(
+                "Removing directory: {}",
+                canonical_target.display()
+            ));
             match fs::remove_dir_all(&canonical_target) {
                 Ok(()) => {
-                    if let Ok(workspace) =
-                        scan_workspace_at(&workspace_root_for_task, &profiles)
-                    {
+                    if let Some(project) = project_before_delete.as_ref() {
+                        match tombstone_catalog_project_at(&workspace_root_for_task, project) {
+                            Ok(true) => {
+                                context.stdout(format!("catalog tombstoned: {}", project.id))
+                            }
+                            Ok(false) => context.stdout(format!(
+                                "catalog unchanged: {} had no origin remote",
+                                project.id
+                            )),
+                            Err(error) => context.stderr(format!(
+                                "catalog tombstone failed for {}: {}",
+                                project.id, error.message
+                            )),
+                        }
+                    } else {
+                        context.stderr(format!(
+                            "catalog tombstone skipped: project '{}' was not found before delete",
+                            project_id_owned
+                        ));
+                    }
+                    if let Ok(workspace) = scan_workspace_at(&workspace_root_for_task, &profiles) {
                         *result_workspace_for_task
                             .lock()
                             .expect("delete result workspace lock poisoned") = Some(workspace);
@@ -1261,7 +1348,10 @@ fn infer_import_directory_name(
 }
 
 fn github_owner_repo_from_remote_url(remote_url: &str) -> Option<(String, String)> {
-    let trimmed = remote_url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let trimmed = remote_url
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git");
     let path = trimmed
         .strip_prefix("https://github.com/")
         .or_else(|| trimmed.strip_prefix("http://github.com/"))
@@ -1463,9 +1553,38 @@ pub(crate) fn clone_import_project(
     timeout: Duration,
     context: &mut crate::TaskContext,
 ) -> Result<(String, String), (String, String)> {
+    let skill_paths = skill_path
+        .map(|skill_path| vec![skill_path.to_string()])
+        .unwrap_or_default();
+    clone_import_project_with_skill_paths(
+        workspace_root,
+        target_path,
+        remote_url,
+        directory_name,
+        &skill_paths,
+        branch,
+        shallow,
+        max_attempts,
+        timeout,
+        context,
+    )
+}
+
+pub(crate) fn clone_import_project_with_skill_paths(
+    workspace_root: &Path,
+    target_path: &Path,
+    remote_url: &str,
+    directory_name: &str,
+    skill_paths: &[String],
+    branch: Option<&str>,
+    shallow: bool,
+    max_attempts: usize,
+    timeout: Duration,
+    context: &mut crate::TaskContext,
+) -> Result<(String, String), (String, String)> {
     let staging_path = create_import_staging_path(workspace_root, directory_name)?;
     let mut args = vec!["clone".to_string()];
-    if skill_path.is_some() {
+    if !skill_paths.is_empty() {
         args.push("--sparse".to_string());
     }
     if shallow {
@@ -1489,13 +1608,13 @@ pub(crate) fn clone_import_project(
         context,
     )?;
 
-    if let Some(skill_path) = skill_path {
-        let set_args = vec![
+    if !skill_paths.is_empty() {
+        let mut set_args = vec![
             "sparse-checkout".to_string(),
             "set".to_string(),
             "--cone".to_string(),
-            skill_path.to_string(),
         ];
+        set_args.extend(skill_paths.iter().cloned());
         context.stdout(format!(
             "git -C {} {}",
             staging_path.display(),
@@ -1516,13 +1635,15 @@ pub(crate) fn clone_import_project(
                 return Err((stdout, stderr));
             }
         }
-        if let Err(message) = ensure_sparse_skill_exists(&staging_path, skill_path) {
-            append_log(&mut stderr, &message);
-            if let Err(error) = remove_partial_import_target(&staging_path) {
-                append_log(&mut stderr, &error);
-                context.stderr(error);
+        for skill_path in skill_paths {
+            if let Err(message) = ensure_sparse_skill_exists(&staging_path, skill_path) {
+                append_log(&mut stderr, &message);
+                if let Err(error) = remove_partial_import_target(&staging_path) {
+                    append_log(&mut stderr, &error);
+                    context.stderr(error);
+                }
+                return Err((stdout, stderr));
             }
-            return Err((stdout, stderr));
         }
     }
 

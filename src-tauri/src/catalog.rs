@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    clone_import_project, git_command_output_with_timeout, load_user_config,
+    clone_import_project_with_skill_paths, git_command_output_with_timeout, load_user_config,
     run_workspace_task_background, run_workspace_task_blocking, safe_import_skill_path,
     safe_project_dir_name, scan_workspace_at, AgentProfile, ConfigError, GitOperationError,
     Project, ProjectTaskRecord, TaskKind, TaskOperationResult, TaskOutcome, TaskStatus, Workspace,
@@ -18,6 +18,7 @@ use crate::{
 
 const CATALOG_SCHEMA_VERSION: u32 = 1;
 const CATALOG_DIR: &str = ".skilldock/catalog";
+const CATALOG_LOCAL_STATE_PATH: &str = ".skilldock/catalog.local.json";
 const CATALOG_REPOS_DIR: &str = ".skilldock/catalog/repos";
 const CATALOG_TOMBSTONES_DIR: &str = ".skilldock/catalog/tombstones";
 const RESTORE_CLONE_MAX_ATTEMPTS: usize = 3;
@@ -34,6 +35,8 @@ pub struct CatalogRepository {
     pub state: CatalogRepositoryState,
     pub branch: Option<String>,
     pub shallow: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_path: Option<String>,
     pub added_at: String,
@@ -77,6 +80,19 @@ pub struct CatalogSyncResult {
     pub summary: String,
     pub stdout: String,
     pub stderr: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogLocalState {
+    #[serde(default)]
+    repositories: BTreeMap<String, CatalogLocalRepositoryState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogLocalRepositoryState {
+    seen_updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +175,7 @@ pub fn load_workspace_catalog_summary_at(
     let repositories = load_catalog_repositories(&workspace_root)?;
     let workspace =
         scan_workspace_at(&workspace_root, agent_profiles).map_err(CatalogError::workspace)?;
+    remember_local_catalog_projects(&workspace_root, &workspace, &repositories)?;
     Ok(catalog_summary_from_workspace(
         &workspace_root,
         repositories,
@@ -180,50 +197,294 @@ pub fn sync_workspace_catalog_from_projects_at(
 ) -> Result<WorkspaceCatalogSummary, CatalogError> {
     let workspace_root =
         crate::validate_workspace_root(workspace_root.as_ref()).map_err(CatalogError::workspace)?;
-    let workspace =
+    compact_catalog_repositories(&workspace_root)?;
+    let mut workspace =
         scan_workspace_at(&workspace_root, agent_profiles).map_err(CatalogError::workspace)?;
-    let existing = load_catalog_repositories(&workspace_root)?;
-    let mut existing_by_id = existing
-        .into_iter()
-        .map(|record| (record.id.clone(), record))
-        .collect::<HashMap<_, _>>();
+    let repositories = load_catalog_repositories(&workspace_root)?;
+    if apply_removed_catalog_projects(&workspace_root, &workspace, &repositories)? {
+        workspace =
+            scan_workspace_at(&workspace_root, agent_profiles).map_err(CatalogError::workspace)?;
+    }
+    let repositories = load_catalog_repositories(&workspace_root)?;
+    let local_state = remember_local_catalog_projects(&workspace_root, &workspace, &repositories)?;
+    tombstone_missing_local_catalog_projects(
+        &workspace_root,
+        &workspace,
+        &repositories,
+        &local_state,
+    )?;
+
+    for project in &workspace.projects {
+        upsert_catalog_project_at(&workspace_root, project)?;
+    }
+
+    let repositories = load_catalog_repositories(&workspace_root)?;
+    remember_local_catalog_projects(&workspace_root, &workspace, &repositories)?;
+    Ok(catalog_summary_from_workspace(
+        &workspace_root,
+        repositories,
+        &workspace,
+    ))
+}
+
+pub(crate) fn upsert_catalog_project_at(
+    workspace_root: &Path,
+    project: &Project,
+) -> Result<bool, CatalogError> {
+    let Some(remote_url) = project.remote_url.as_ref() else {
+        return Ok(false);
+    };
+    let id = catalog_repository_id(remote_url);
     let now = unix_timestamp();
+    let existing = load_catalog_repositories(workspace_root)?;
+    let mut record = existing
+        .into_iter()
+        .find(|record| record.id == id)
+        .unwrap_or_else(|| CatalogRepository {
+            schema_version: CATALOG_SCHEMA_VERSION,
+            id: id.clone(),
+            remote_url: remote_url.clone(),
+            directory_name: project.id.clone(),
+            state: CatalogRepositoryState::Active,
+            branch: None,
+            shallow: false,
+            skill_paths: Vec::new(),
+            skill_path: None,
+            added_at: now.clone(),
+            updated_at: now.clone(),
+        });
+    record.schema_version = CATALOG_SCHEMA_VERSION;
+    record.remote_url = remote_url.clone();
+    record.directory_name = project.id.clone();
+    record.state = CatalogRepositoryState::Active;
+    record.skill_paths = sparse_skill_paths_for_project(project);
+    record.skill_path = if record.skill_paths.len() == 1 {
+        Some(record.skill_paths[0].clone())
+    } else {
+        None
+    };
+    record.updated_at = now;
+    save_catalog_repository(workspace_root, &record)?;
+    remove_catalog_tombstone(workspace_root, &record.id)?;
+    remember_catalog_project_seen(workspace_root, &record.id, &record.updated_at)?;
+    Ok(true)
+}
+
+fn tombstone_missing_local_catalog_projects(
+    workspace_root: &Path,
+    workspace: &Workspace,
+    repositories: &[CatalogRepository],
+    local_state: &CatalogLocalState,
+) -> Result<bool, CatalogError> {
+    let local_ids = workspace
+        .projects
+        .iter()
+        .filter_map(|project| {
+            project
+                .remote_url
+                .as_ref()
+                .map(|remote_url| catalog_repository_id(remote_url))
+        })
+        .collect::<HashSet<_>>();
+
+    let mut tombstoned_any = false;
+    for record in repositories {
+        if !matches!(record.state, CatalogRepositoryState::Active)
+            || local_ids.contains(record.id.as_str())
+        {
+            continue;
+        }
+        let Some(local_record) = local_state.repositories.get(&record.id) else {
+            continue;
+        };
+        if catalog_record_updated_at(record) > catalog_local_record_seen_updated_at(local_record) {
+            continue;
+        }
+        tombstone_catalog_record_at(workspace_root, record)?;
+        tombstoned_any = true;
+    }
+    Ok(tombstoned_any)
+}
+
+fn tombstone_catalog_record_at(
+    workspace_root: &Path,
+    record: &CatalogRepository,
+) -> Result<(), CatalogError> {
+    let mut record = record.clone();
+    record.schema_version = CATALOG_SCHEMA_VERSION;
+    record.state = CatalogRepositoryState::Removed;
+    record.updated_at = unix_timestamp();
+    save_catalog_repository(workspace_root, &record)?;
+    remove_catalog_repo_record(workspace_root, &record.id)
+}
+
+fn remember_local_catalog_projects(
+    workspace_root: &Path,
+    workspace: &Workspace,
+    repositories: &[CatalogRepository],
+) -> Result<CatalogLocalState, CatalogError> {
+    let mut state = load_catalog_local_state(workspace_root)?;
+    let records_by_id = repositories
+        .iter()
+        .map(|record| (record.id.as_str(), record))
+        .collect::<HashMap<_, _>>();
+    let mut changed = false;
 
     for project in &workspace.projects {
         let Some(remote_url) = project.remote_url.as_ref() else {
             continue;
         };
         let id = catalog_repository_id(remote_url);
-        let mut record = existing_by_id
-            .remove(&id)
-            .unwrap_or_else(|| CatalogRepository {
-                schema_version: CATALOG_SCHEMA_VERSION,
-                id: id.clone(),
-                remote_url: remote_url.clone(),
-                directory_name: project.id.clone(),
-                state: CatalogRepositoryState::Active,
-                branch: None,
-                shallow: false,
-                skill_path: None,
-                added_at: now.clone(),
-                updated_at: now.clone(),
-            });
-        record.schema_version = CATALOG_SCHEMA_VERSION;
-        record.remote_url = remote_url.clone();
-        record.directory_name = project.id.clone();
-        record.state = CatalogRepositoryState::Active;
-        record.skill_path = sparse_skill_path_for_project(project);
-        record.updated_at = now.clone();
-        save_catalog_repository(&workspace_root, &record)?;
-        remove_catalog_tombstone(&workspace_root, &record.id)?;
+        let seen_updated_at = records_by_id
+            .get(id.as_str())
+            .map(|record| record.updated_at.clone())
+            .unwrap_or_else(unix_timestamp);
+        let next = CatalogLocalRepositoryState { seen_updated_at };
+        if state.repositories.get(&id) != Some(&next) {
+            state.repositories.insert(id, next);
+            changed = true;
+        }
     }
 
-    let repositories = load_catalog_repositories(&workspace_root)?;
-    Ok(catalog_summary_from_workspace(
-        &workspace_root,
-        repositories,
-        &workspace,
-    ))
+    if changed {
+        save_catalog_local_state(workspace_root, &state)?;
+    }
+    Ok(state)
+}
+
+fn remember_catalog_project_seen(
+    workspace_root: &Path,
+    id: &str,
+    seen_updated_at: &str,
+) -> Result<(), CatalogError> {
+    let mut state = load_catalog_local_state(workspace_root)?;
+    let next = CatalogLocalRepositoryState {
+        seen_updated_at: seen_updated_at.to_string(),
+    };
+    if state.repositories.get(id) == Some(&next) {
+        return Ok(());
+    }
+    state.repositories.insert(id.to_string(), next);
+    save_catalog_local_state(workspace_root, &state)
+}
+
+fn load_catalog_local_state(workspace_root: &Path) -> Result<CatalogLocalState, CatalogError> {
+    let path = workspace_root.join(CATALOG_LOCAL_STATE_PATH);
+    match fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str::<CatalogLocalState>(&contents)
+            .map_err(|error| CatalogError::invalid_catalog(&path, error.to_string())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(CatalogLocalState::default())
+        }
+        Err(error) => Err(CatalogError::io(&path, error.to_string())),
+    }
+}
+
+fn save_catalog_local_state(
+    workspace_root: &Path,
+    state: &CatalogLocalState,
+) -> Result<(), CatalogError> {
+    let path = workspace_root.join(CATALOG_LOCAL_STATE_PATH);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| CatalogError::io(parent, error.to_string()))?;
+    }
+    let serialized = serde_json::to_string_pretty(state)
+        .map_err(|error| CatalogError::io(&path, error.to_string()))?;
+    let mut file =
+        fs::File::create(&path).map_err(|error| CatalogError::io(&path, error.to_string()))?;
+    file.write_all(serialized.as_bytes())
+        .and_then(|_| file.write_all(b"\n"))
+        .map_err(|error| CatalogError::io(&path, error.to_string()))
+}
+
+fn catalog_local_record_seen_updated_at(record: &CatalogLocalRepositoryState) -> u64 {
+    record.seen_updated_at.parse().unwrap_or(0)
+}
+
+fn apply_removed_catalog_projects(
+    workspace_root: &Path,
+    workspace: &Workspace,
+    repositories: &[CatalogRepository],
+) -> Result<bool, CatalogError> {
+    let removed_ids = repositories
+        .iter()
+        .filter(|record| matches!(record.state, CatalogRepositoryState::Removed))
+        .map(|record| record.id.as_str())
+        .collect::<HashSet<_>>();
+    if removed_ids.is_empty() {
+        return Ok(false);
+    }
+
+    let mut removed_any = false;
+    for project in &workspace.projects {
+        let Some(remote_url) = project.remote_url.as_ref() else {
+            continue;
+        };
+        if removed_ids.contains(catalog_repository_id(remote_url).as_str()) {
+            remove_local_catalog_project(workspace_root, project)?;
+            removed_any = true;
+        }
+    }
+    Ok(removed_any)
+}
+
+fn remove_local_catalog_project(
+    workspace_root: &Path,
+    project: &Project,
+) -> Result<(), CatalogError> {
+    safe_project_dir_name(&project.id).map_err(CatalogError::git_operation)?;
+    let path = Path::new(&project.path);
+    let canonical_path =
+        fs::canonicalize(path).map_err(|error| CatalogError::io(path, error.to_string()))?;
+    if !canonical_path.starts_with(workspace_root) {
+        return Err(CatalogError::workspace(WorkspaceError::outside_workspace(
+            &canonical_path,
+        )));
+    }
+    fs::remove_dir_all(&canonical_path)
+        .map_err(|error| CatalogError::io(&canonical_path, error.to_string()))
+}
+
+pub(crate) fn tombstone_catalog_project_at(
+    workspace_root: &Path,
+    project: &Project,
+) -> Result<bool, CatalogError> {
+    let Some(remote_url) = project.remote_url.as_ref() else {
+        return Ok(false);
+    };
+    let id = catalog_repository_id(remote_url);
+    let now = unix_timestamp();
+    let existing = load_catalog_repositories(workspace_root)?;
+    let mut record = existing
+        .into_iter()
+        .find(|record| record.id == id)
+        .unwrap_or_else(|| CatalogRepository {
+            schema_version: CATALOG_SCHEMA_VERSION,
+            id: id.clone(),
+            remote_url: remote_url.clone(),
+            directory_name: project.id.clone(),
+            state: CatalogRepositoryState::Removed,
+            branch: None,
+            shallow: false,
+            skill_paths: Vec::new(),
+            skill_path: None,
+            added_at: now.clone(),
+            updated_at: now.clone(),
+        });
+    record.schema_version = CATALOG_SCHEMA_VERSION;
+    record.remote_url = remote_url.clone();
+    record.directory_name = project.id.clone();
+    record.state = CatalogRepositoryState::Removed;
+    record.skill_paths = sparse_skill_paths_for_project(project);
+    record.skill_path = if record.skill_paths.len() == 1 {
+        Some(record.skill_paths[0].clone())
+    } else {
+        None
+    };
+    record.updated_at = now;
+    save_catalog_repository(workspace_root, &record)?;
+    remove_catalog_repo_record(workspace_root, &record.id)?;
+    Ok(true)
 }
 
 #[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
@@ -290,13 +551,18 @@ fn restore_missing_catalog_repositories_with_mode(
         let mut cancelled = false;
         let mut project_outcomes = Vec::new();
 
-        for item in &missing {
+        let total = missing.len();
+        for (index, item) in missing.iter().enumerate() {
             if context.is_cancelled() {
                 cancelled = true;
                 context.stderr("cancelled after current repository");
                 break;
             }
 
+            let position = index + 1;
+            let progress_summary = format!("Restoring {position}/{total}: {}", item.directory_name);
+            context.set_summary(&progress_summary);
+            context.stdout(&progress_summary);
             let target_path = workspace_root_for_task.join(&item.directory_name);
             let mut outcome = ProjectTaskRecord {
                 project_id: item.directory_name.clone(),
@@ -325,12 +591,13 @@ fn restore_missing_catalog_repositories_with_mode(
                 project_outcomes.push(outcome);
                 continue;
             }
-            match clone_import_project(
+            let skill_paths = catalog_record_skill_paths(item);
+            match clone_import_project_with_skill_paths(
                 &workspace_root_for_task,
                 &target_path,
                 &item.remote_url,
                 &item.directory_name,
-                item.skill_path.as_deref(),
+                &skill_paths,
                 item.branch.as_deref(),
                 item.shallow,
                 RESTORE_CLONE_MAX_ATTEMPTS,
@@ -340,6 +607,7 @@ fn restore_missing_catalog_repositories_with_mode(
                 Ok((stdout, stderr)) => {
                     context.stdout(stdout);
                     context.stderr(stderr);
+                    context.stdout(format!("restored: {}", item.directory_name));
                     outcome.status = TaskStatus::Succeeded;
                     outcome.summary = "restored".to_string();
                     ok += 1;
@@ -347,6 +615,7 @@ fn restore_missing_catalog_repositories_with_mode(
                 Err((stdout, stderr)) => {
                     context.stdout(stdout);
                     context.stderr(&stderr);
+                    context.stderr(format!("restore failed: {}", item.directory_name));
                     outcome.status = TaskStatus::Failed;
                     outcome.summary = "clone failed".to_string();
                     outcome.error = Some(
@@ -442,6 +711,7 @@ pub fn initialize_catalog_git_sync_at(
         .as_ref()
         .map(|value| value.trim())
         .filter(|v| !v.is_empty())
+        .map(normalize_catalog_remote_url)
     {
         let remotes = Command::new("git")
             .arg("-C")
@@ -453,9 +723,9 @@ pub fn initialize_catalog_git_sync_at(
             .lines()
             .any(|remote| remote == "origin");
         let args = if remote_exists {
-            vec!["remote", "set-url", "origin", remote_url]
+            vec!["remote", "set-url", "origin", remote_url.as_str()]
         } else {
-            vec!["remote", "add", "origin", remote_url]
+            vec!["remote", "add", "origin", remote_url.as_str()]
         };
         let (out, err) = git_output(&workspace_root, &args)?;
         append_output(&mut stdout, &out);
@@ -495,7 +765,8 @@ pub fn pull_catalog_git_sync_at(
             &workspace_root,
             &[
                 "pull".to_string(),
-                "--ff-only".to_string(),
+                "--rebase".to_string(),
+                "--autostash".to_string(),
                 "origin".to_string(),
                 branch,
             ],
@@ -719,35 +990,64 @@ fn local_only_comparison(
     })
 }
 
-fn sparse_skill_path_for_project(project: &Project) -> Option<String> {
+fn sparse_skill_paths_for_project(project: &Project) -> Vec<String> {
     let project_path = Path::new(&project.path);
-    let (stdout, _) = git_command_output_with_timeout(
+    let Ok((stdout, _)) = git_command_output_with_timeout(
         project_path,
         &["sparse-checkout".to_string(), "list".to_string()],
         CATALOG_GIT_TIMEOUT,
-    )
-    .ok()?;
-    let paths = stdout
+    ) else {
+        return Vec::new();
+    };
+    let mut paths = stdout
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
+        .filter_map(|path| safe_import_skill_path(path).ok())
+        .filter(|path| project_path.join(path).join("SKILL.md").is_file())
         .collect::<Vec<_>>();
-    if paths.len() != 1 {
-        return None;
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn catalog_record_skill_paths(record: &CatalogRepository) -> Vec<String> {
+    if !record.skill_paths.is_empty() {
+        return record.skill_paths.clone();
     }
-    let skill_path = safe_import_skill_path(paths[0]).ok()?;
-    if project_path.join(&skill_path).join("SKILL.md").is_file() {
-        Some(skill_path)
-    } else {
-        None
-    }
+    record.skill_path.iter().cloned().collect()
 }
 
 fn load_catalog_repositories(
     workspace_root: &Path,
 ) -> Result<Vec<CatalogRepository>, CatalogError> {
+    let entries = load_catalog_repository_entries(workspace_root)?;
+    let mut records_by_id: HashMap<String, CatalogRepository> = HashMap::new();
+    for entry in entries {
+        let id = entry.record.id.clone();
+        let should_replace = records_by_id
+            .get(&id)
+            .map(|current| catalog_record_wins(&entry.record, current))
+            .unwrap_or(true);
+        if should_replace {
+            records_by_id.insert(id, entry.record);
+        }
+    }
+    let mut records = records_by_id.into_values().collect::<Vec<_>>();
+    records.sort_by(|left, right| left.directory_name.cmp(&right.directory_name));
+    Ok(records)
+}
+
+#[derive(Debug, Clone)]
+struct CatalogRepositoryEntry {
+    record: CatalogRepository,
+}
+
+fn load_catalog_repository_entries(
+    workspace_root: &Path,
+) -> Result<Vec<CatalogRepositoryEntry>, CatalogError> {
     ensure_catalog_directories(workspace_root)?;
-    let mut records = Vec::new();
+    let mut entries = Vec::new();
     for directory in [
         workspace_root.join(CATALOG_REPOS_DIR),
         workspace_root.join(CATALOG_TOMBSTONES_DIR),
@@ -774,14 +1074,59 @@ fn load_catalog_repositories(
                 ));
             }
             safe_project_dir_name(&record.directory_name).map_err(CatalogError::git_operation)?;
+            for skill_path in &record.skill_paths {
+                safe_import_skill_path(skill_path).map_err(CatalogError::git_operation)?;
+            }
             if let Some(skill_path) = record.skill_path.as_deref() {
                 safe_import_skill_path(skill_path).map_err(CatalogError::git_operation)?;
             }
-            records.push(record);
+            entries.push(CatalogRepositoryEntry { record });
         }
     }
-    records.sort_by(|left, right| left.directory_name.cmp(&right.directory_name));
-    Ok(records)
+    Ok(entries)
+}
+
+fn compact_catalog_repositories(workspace_root: &Path) -> Result<(), CatalogError> {
+    let entries = load_catalog_repository_entries(workspace_root)?;
+    let mut winners_by_id: HashMap<String, CatalogRepositoryEntry> = HashMap::new();
+    for entry in entries {
+        let id = entry.record.id.clone();
+        let should_replace = winners_by_id
+            .get(&id)
+            .map(|current| catalog_record_wins(&entry.record, &current.record))
+            .unwrap_or(true);
+        if should_replace {
+            winners_by_id.insert(id, entry);
+        }
+    }
+
+    for winner in winners_by_id.values() {
+        save_catalog_repository(workspace_root, &winner.record)?;
+        match winner.record.state {
+            CatalogRepositoryState::Active => {
+                remove_catalog_tombstone(workspace_root, &winner.record.id)?
+            }
+            CatalogRepositoryState::Removed => {
+                remove_catalog_repo_record(workspace_root, &winner.record.id)?
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn catalog_record_wins(candidate: &CatalogRepository, current: &CatalogRepository) -> bool {
+    let candidate_updated = catalog_record_updated_at(candidate);
+    let current_updated = catalog_record_updated_at(current);
+    if candidate_updated != current_updated {
+        return candidate_updated > current_updated;
+    }
+    matches!(candidate.state, CatalogRepositoryState::Active)
+        && matches!(current.state, CatalogRepositoryState::Removed)
+}
+
+fn catalog_record_updated_at(record: &CatalogRepository) -> u64 {
+    record.updated_at.parse().unwrap_or(0)
 }
 
 fn save_catalog_repository(
@@ -809,6 +1154,17 @@ fn save_catalog_repository(
 fn remove_catalog_tombstone(workspace_root: &Path, id: &str) -> Result<(), CatalogError> {
     let path = workspace_root
         .join(CATALOG_TOMBSTONES_DIR)
+        .join(format!("{}.json", catalog_filename(id)));
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CatalogError::io(&path, error.to_string())),
+    }
+}
+
+fn remove_catalog_repo_record(workspace_root: &Path, id: &str) -> Result<(), CatalogError> {
+    let path = workspace_root
+        .join(CATALOG_REPOS_DIR)
         .join(format!("{}.json", catalog_filename(id)));
     match fs::remove_file(&path) {
         Ok(()) => Ok(()),
@@ -889,6 +1245,28 @@ fn catalog_repository_id(remote_url: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn normalize_catalog_remote_url(remote_url: &str) -> String {
+    let trimmed = remote_url.trim();
+    let Some(rest) = trimmed.strip_prefix("https://github.com/") else {
+        return trimmed.to_string();
+    };
+    let without_query = rest
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .trim_matches('/');
+    let parts = without_query
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return trimmed.to_string();
+    }
+    let owner = parts[0];
+    let repo = parts[1].trim_end_matches(".git");
+    format!("https://github.com/{owner}/{repo}.git")
+}
+
 fn catalog_filename(id: &str) -> String {
     let mut output = String::new();
     for ch in id.chars() {
@@ -908,7 +1286,7 @@ fn unix_timestamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs()
+        .as_millis()
         .to_string()
 }
 
