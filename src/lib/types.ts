@@ -241,6 +241,7 @@ export type CatalogRepository = {
   state: CatalogRepositoryState;
   branch?: string;
   shallow: boolean;
+  skillPaths?: string[];
   skillPath?: string;
   addedAt: string;
   updatedAt: string;

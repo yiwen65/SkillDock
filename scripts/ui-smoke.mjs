@@ -209,14 +209,9 @@ try {
     workspaceRoot: workspace.root,
   });
   assert.equal(
-    unsyncedCatalogActions.publishListDisabled,
+    unsyncedCatalogActions.syncNowDisabled,
     true,
-    "publish should stay disabled until a catalog remote is configured",
-  );
-  assert.equal(
-    unsyncedCatalogActions.pullListDisabled,
-    true,
-    "pull should stay disabled until a catalog remote is configured",
+    "sync should stay disabled until a catalog remote is configured",
   );
 
   const syncedCatalogActions = catalogActionState({
@@ -236,9 +231,8 @@ try {
     catalogRemoteDraft: "https://github.com/example/skilldock-catalog.git",
     workspaceRoot: workspace.root,
   });
-  assert.equal(syncedCatalogActions.publishListDisabled, false);
-  assert.equal(syncedCatalogActions.pullListDisabled, false);
-  assert.equal(syncedCatalogActions.cloneMissingDisabled, false);
+  assert.equal(syncedCatalogActions.syncNowDisabled, false);
+  assert.equal(syncedCatalogActions.restoreMissingDisabled, false);
 
   const pendingRestoreCatalogActions = catalogActionState({
     busy: false,
@@ -258,9 +252,9 @@ try {
     workspaceRoot: workspace.root,
   });
   assert.equal(
-    pendingRestoreCatalogActions.cloneMissingDisabled,
+    pendingRestoreCatalogActions.restoreMissingDisabled,
     true,
-    "clone missing should stay disabled while a restore task is already queued",
+    "restore missing should stay disabled while a restore task is already queued",
   );
 
   const normalizedProfiles = normalizeProfileDrafts([

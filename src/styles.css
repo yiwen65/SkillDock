@@ -1922,6 +1922,31 @@ textarea::placeholder {
   font-weight: 700;
 }
 
+.catalog-sync-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.catalog-sync-actions button {
+  min-width: 0;
+}
+
+.catalog-details {
+  display: grid;
+  gap: 10px;
+}
+
+.catalog-details summary {
+  cursor: pointer;
+  color: var(--color-muted-strong);
+  font-weight: 700;
+}
+
+.catalog-details[open] {
+  gap: 12px;
+}
+
 .catalog-list span:not(.setting-label) {
   overflow: hidden;
   color: var(--color-muted);

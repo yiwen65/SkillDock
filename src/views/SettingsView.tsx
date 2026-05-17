@@ -144,19 +144,13 @@ export function catalogActionState({
   workspaceRoot: string;
 }) {
   const hasWorkspace = workspaceRoot.trim().length > 0;
-  const hasCatalogRemote = Boolean(catalog?.gitRemote?.trim());
   const hasCatalogRemoteDraft = catalogRemoteDraft.trim().length > 0;
-  const canPullOrPublishCatalog =
-    hasWorkspace && Boolean(catalog?.gitSyncAvailable) && hasCatalogRemote;
 
   return {
-    cloneMissingDisabled: busy || catalogRestorePending || !hasWorkspace || !catalog?.missingCount,
-    initSyncDisabled: busy || !hasWorkspace || !hasCatalogRemoteDraft,
-    publishListDisabled: busy || !canPullOrPublishCatalog,
-    pullListDisabled: busy || !canPullOrPublishCatalog,
-    refreshDisabled: busy || !hasWorkspace,
+    restoreMissingDisabled:
+      busy || catalogRestorePending || !hasWorkspace || !catalog?.missingCount,
     remoteInputDisabled: busy,
-    saveLocalListDisabled: busy || !hasWorkspace,
+    syncNowDisabled: busy || !hasWorkspace || !hasCatalogRemoteDraft,
   };
 }
 
@@ -329,42 +323,6 @@ export const SettingsView = memo(function SettingsView({
     }
   };
 
-  const refreshCatalog = async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setMessage("Loading catalog...");
-    try {
-      const summary = await loadWorkspaceCatalogSummary(workspace.root);
-      setCatalog(summary);
-      setCatalogRemoteDraft(summary.gitRemote || "");
-      setCatalogRestorePending(false);
-      setMessage("Catalog refreshed.");
-    } catch (error) {
-      setMessage(errorMessage(error));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
-
-  const saveCatalogFromProjects = async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setMessage("Saving local project list to catalog...");
-    try {
-      const summary = await syncWorkspaceCatalogFromProjects(workspace.root);
-      setCatalog(summary);
-      setMessage(`Catalog saved with ${summary.activeCount} active repositories.`);
-    } catch (error) {
-      setMessage(errorMessage(error));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
-
   const restoreCatalogRepositories = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -383,57 +341,44 @@ export const SettingsView = memo(function SettingsView({
     }
   };
 
-  const initializeCatalogSync = async () => {
+  const syncCatalogNow = async () => {
     if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setMessage("Initializing catalog Git sync...");
-    try {
-      const result = await initializeCatalogGitSync(
-        workspace.root,
-        catalogRemoteDraft.trim() || undefined,
-      );
-      const summary = await loadWorkspaceCatalogSummary(workspace.root);
-      setCatalog(summary);
-      setMessage(result.summary);
-    } catch (error) {
-      setMessage(errorMessage(error));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
+    const remoteDraft = catalogRemoteDraft.trim();
+    if (!remoteDraft) {
+      setMessage("Add a catalog remote before syncing.");
+      return;
     }
-  };
-
-  const pullCatalog = async () => {
-    if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
-    setMessage("Pulling catalog updates...");
+    setMessage("Syncing catalog...");
     try {
-      const result = await pullCatalogGitSync(workspace.root);
+      const before = catalog ?? (await loadWorkspaceCatalogSummary(workspace.root));
+      const remoteChanged = remoteDraft !== (before.gitRemote || "").trim();
+      if (!before.gitSyncAvailable || remoteChanged) {
+        setMessage("Preparing catalog remote...");
+        await initializeCatalogGitSync(workspace.root, remoteDraft);
+      }
+
+      const prepared = await loadWorkspaceCatalogSummary(workspace.root);
+      if (prepared.gitRemote) {
+        setMessage("Pulling catalog changes...");
+        await pullCatalogGitSync(workspace.root);
+      }
+
+      setMessage("Saving local catalog changes...");
+      await syncWorkspaceCatalogFromProjects(workspace.root);
+
+      setMessage("Publishing catalog changes...");
+      const published = await publishCatalogGitSync(workspace.root);
       const nextWorkspace = await scanWorkspace(workspace.root);
       const summary = await loadWorkspaceCatalogSummary(workspace.root);
       setCatalog(summary);
-      onWorkspaceChange(nextWorkspace, result.summary);
-      setMessage(result.summary);
-    } catch (error) {
-      setMessage(errorMessage(error));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
-
-  const publishCatalog = async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setMessage("Publishing catalog updates...");
-    try {
-      const result = await publishCatalogGitSync(workspace.root);
-      const summary = await loadWorkspaceCatalogSummary(workspace.root);
-      setCatalog(summary);
-      setMessage(result.summary);
+      setCatalogRemoteDraft(summary.gitRemote || remoteDraft);
+      setCatalogRestorePending(false);
+      onWorkspaceChange(nextWorkspace, published.summary);
+      setMessage(
+        `Catalog synced. ${summary.activeCount} tracked, ${summary.missingCount} missing here.`,
+      );
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -540,80 +485,57 @@ export const SettingsView = memo(function SettingsView({
           <span>Catalog remote</span>
           <input
             onChange={(event) => setCatalogRemoteDraft(event.target.value)}
-            placeholder="git@github.com:you/skilldock-catalog.git"
+            placeholder="https://github.com/you/skilldock-catalog.git"
             value={catalogRemoteDraft}
             disabled={catalogActions.remoteInputDisabled}
           />
         </label>
-        <div className="panel-actions">
+        <div className="catalog-sync-actions">
           <button
-            className="secondary-button"
-            disabled={catalogActions.refreshDisabled}
-            onClick={refreshCatalog}
+            className="primary-button"
+            disabled={catalogActions.syncNowDisabled}
+            onClick={syncCatalogNow}
             type="button"
           >
-            Refresh
+            Sync now
           </button>
           <button
             className="secondary-button"
-            disabled={catalogActions.saveLocalListDisabled}
-            onClick={saveCatalogFromProjects}
-            type="button"
-          >
-            Save local list
-          </button>
-          <button
-            className="secondary-button"
-            disabled={catalogActions.cloneMissingDisabled}
+            disabled={catalogActions.restoreMissingDisabled}
             onClick={restoreCatalogRepositories}
             type="button"
           >
-            Clone missing
+            Restore missing
           </button>
         </div>
-        <div className="panel-actions">
-          <button
-            className="secondary-button"
-            disabled={catalogActions.initSyncDisabled}
-            onClick={initializeCatalogSync}
-            type="button"
-          >
-            Init sync
-          </button>
-          <button
-            className="secondary-button"
-            disabled={catalogActions.pullListDisabled}
-            onClick={pullCatalog}
-            type="button"
-          >
-            Pull list
-          </button>
-          <button
-            className="primary-button"
-            disabled={catalogActions.publishListDisabled}
-            onClick={publishCatalog}
-            type="button"
-          >
-            Publish list
-          </button>
-        </div>
-        {catalog?.gitRemote && <p className="batch-message">Remote: {catalog.gitRemote}</p>}
-        {catalog?.missing.length ? (
-          <div className="catalog-list">
-            <span className="setting-label">Missing repositories</span>
-            {catalog.missing.slice(0, 5).map((item) => (
-              <span key={item.id}>{item.directoryName}</span>
-            ))}
-          </div>
-        ) : null}
-        {catalog?.localOnly.length ? (
-          <div className="catalog-list">
-            <span className="setting-label">Local repositories not in catalog</span>
-            {catalog.localOnly.slice(0, 5).map((item) => (
-              <span key={item.id}>{item.directoryName}</span>
-            ))}
-          </div>
-        ) : null}
+        <p className="batch-message">
+          {catalog?.gitRemote
+            ? `Remote: ${catalog.gitRemote}`
+            : "Enter a remote once, then use Sync now for pull, save, and publish."}
+        </p>
+        <details className="catalog-details">
+          <summary>Catalog details</summary>
+          {catalog?.missing.length ? (
+            <div className="catalog-list">
+              <span className="setting-label">Missing repositories</span>
+              {catalog.missing.slice(0, 5).map((item) => (
+                <span key={item.id}>{item.directoryName}</span>
+              ))}
+            </div>
+          ) : (
+            <p className="batch-message">No missing repositories.</p>
+          )}
+          {catalog?.localOnly.length ? (
+            <div className="catalog-list">
+              <span className="setting-label">Local repositories not in catalog</span>
+              {catalog.localOnly.slice(0, 5).map((item) => (
+                <span key={item.id}>{item.directoryName}</span>
+              ))}
+            </div>
+          ) : (
+            <p className="batch-message">No local-only repositories.</p>
+          )}
+        </details>
       </section>
 
       <section className="data-panel compact-form settings-grid">
