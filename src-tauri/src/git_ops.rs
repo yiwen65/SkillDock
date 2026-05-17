@@ -101,9 +101,13 @@ pub fn plan_import_project(
         .map(safe_import_skill_path)
         .transpose()?
         .or(normalized_source.skill_path);
+    let mut directory_name_is_explicit = false;
     let directory_name = match request.directory_name.as_deref() {
         Some(directory_name) => match safe_project_dir_name(directory_name) {
-            Ok(directory_name) => directory_name,
+            Ok(directory_name) => {
+                directory_name_is_explicit = true;
+                directory_name
+            }
             Err(error) => {
                 if skill_path.is_none() && looks_like_misplaced_skill_path(directory_name) {
                     if let Ok(path) = safe_import_skill_path(directory_name) {
@@ -118,6 +122,11 @@ pub fn plan_import_project(
             }
         },
         None => infer_import_directory_name(&remote_url, skill_path.as_deref())?,
+    };
+    let directory_name = if directory_name_is_explicit {
+        directory_name
+    } else {
+        disambiguate_default_directory_name(&workspace_root, &directory_name, &remote_url)?
     };
     let target_path = workspace_root.join(&directory_name);
     let will_clone = !target_path.exists();
@@ -227,6 +236,17 @@ fn run_import_project_task(
     let job = move |context: &mut crate::TaskContext| {
         let outcome = if target_path.exists() {
             if is_git_repository(&target_path) {
+                if let Some(existing_remote) =
+                    existing_origin_remote_if_different(&target_path, &plan.remote_url)
+                {
+                    return TaskOutcome::failed(
+                        format!("Import blocked for {}", plan.directory_name),
+                        format!(
+                            "Project directory '{}' already points at a different remote: {}",
+                            plan.directory_name, existing_remote
+                        ),
+                    );
+                }
                 if let Some(skill_path) = plan.skill_path.as_deref() {
                     if let Err(message) = ensure_sparse_skill_exists(&target_path, skill_path) {
                         match add_skill_to_existing_sparse_checkout(
@@ -1256,6 +1276,48 @@ fn github_owner_repo_from_remote_url(remote_url: &str) -> Option<(String, String
     Some((owner.to_string(), repo.to_string()))
 }
 
+fn owner_qualified_directory_name(remote_url: &str) -> Option<String> {
+    let (owner, repo) = github_owner_repo_from_remote_url(remote_url)?;
+    safe_project_dir_name(&format!("{owner}-{repo}")).ok()
+}
+
+fn disambiguate_default_directory_name(
+    workspace_root: &Path,
+    directory_name: &str,
+    remote_url: &str,
+) -> Result<String, GitOperationError> {
+    let target_path = workspace_root.join(directory_name);
+    let Some(existing_remote) = existing_origin_remote_if_different(&target_path, remote_url)
+    else {
+        return Ok(directory_name.to_string());
+    };
+
+    let Some(disambiguated_name) = owner_qualified_directory_name(remote_url) else {
+        return Err(GitOperationError::invalid_repository(format!(
+            "Project directory '{}' already points at a different remote: {}. Choose a different directory name.",
+            directory_name, existing_remote
+        )));
+    };
+    if disambiguated_name == directory_name {
+        return Err(GitOperationError::invalid_repository(format!(
+            "Project directory '{}' already points at a different remote: {}. Choose a different directory name.",
+            directory_name, existing_remote
+        )));
+    }
+
+    let disambiguated_path = workspace_root.join(&disambiguated_name);
+    let Some(disambiguated_remote) =
+        existing_origin_remote_if_different(&disambiguated_path, remote_url)
+    else {
+        return Ok(disambiguated_name);
+    };
+
+    Err(GitOperationError::invalid_repository(format!(
+        "Project directory '{}' already points at a different remote: {}. Choose a different directory name.",
+        disambiguated_name, disambiguated_remote
+    )))
+}
+
 pub(crate) fn safe_project_dir_name(name: &str) -> Result<String, GitOperationError> {
     let name = name.trim();
     if name.is_empty()
@@ -1309,6 +1371,48 @@ fn is_git_repository(path: &Path) -> bool {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
+}
+
+fn existing_origin_remote_if_different(project_path: &Path, remote_url: &str) -> Option<String> {
+    let existing_remote = existing_origin_remote(project_path)?;
+    if git_remote_identity(&existing_remote) == git_remote_identity(remote_url) {
+        None
+    } else {
+        Some(existing_remote)
+    }
+}
+
+fn existing_origin_remote(project_path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(project_path)
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let remote = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if remote.is_empty() {
+        None
+    } else {
+        Some(remote)
+    }
+}
+
+fn git_remote_identity(remote_url: &str) -> String {
+    if let Some((owner, repo)) = github_owner_repo_from_remote_url(remote_url) {
+        return format!(
+            "github.com/{}/{}",
+            owner.to_ascii_lowercase(),
+            repo.to_ascii_lowercase()
+        );
+    }
+    remote_url
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .to_ascii_lowercase()
 }
 
 pub(crate) fn clone_with_retries(

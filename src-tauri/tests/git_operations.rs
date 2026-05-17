@@ -249,6 +249,111 @@ fn import_plan_treats_directory_name_with_slashes_as_skill_path_when_unambiguous
 }
 
 #[test]
+fn import_plan_uses_owner_repo_directory_when_default_name_collides_with_different_remote() {
+    let workspace = temp_dir("import_plan_remote_collision");
+    let existing = workspace.join("agent-skills");
+    std::fs::create_dir_all(&existing).unwrap();
+    git(&existing, &["init"]);
+    git(
+        &existing,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/first/agent-skills.git",
+        ],
+    );
+
+    let plan = plan_import_project(
+        &workspace,
+        &ImportProjectRequest {
+            source: "second/agent-skills".to_string(),
+            directory_name: None,
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.remote_url,
+        "https://github.com/second/agent-skills.git"
+    );
+    assert_eq!(plan.directory_name, "second-agent-skills");
+    assert_eq!(
+        plan.target_path,
+        workspace.join("second-agent-skills").display().to_string()
+    );
+    assert!(plan.will_clone);
+}
+
+#[test]
+fn import_plan_keeps_default_directory_when_existing_remote_matches() {
+    let workspace = temp_dir("import_plan_matching_remote");
+    let existing = workspace.join("agent-skills");
+    std::fs::create_dir_all(&existing).unwrap();
+    git(&existing, &["init"]);
+    git(
+        &existing,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/first/agent-skills.git",
+        ],
+    );
+
+    let plan = plan_import_project(
+        &workspace,
+        &ImportProjectRequest {
+            source: "first/agent-skills".to_string(),
+            directory_name: None,
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(plan.directory_name, "agent-skills");
+    assert_eq!(
+        plan.target_path,
+        workspace.join("agent-skills").display().to_string()
+    );
+    assert!(!plan.will_clone);
+}
+
+#[test]
+fn import_plan_matches_equivalent_github_remote_forms() {
+    let workspace = temp_dir("import_plan_equivalent_remote");
+    let existing = workspace.join("agent-skills");
+    std::fs::create_dir_all(&existing).unwrap();
+    git(&existing, &["init"]);
+    git(
+        &existing,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:first/agent-skills.git",
+        ],
+    );
+
+    let plan = plan_import_project(
+        &workspace,
+        &ImportProjectRequest {
+            source: "https://github.com/first/agent-skills.git".to_string(),
+            directory_name: None,
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(plan.directory_name, "agent-skills");
+    assert!(!plan.will_clone);
+}
+
+#[test]
 fn import_project_clones_local_repo_and_returns_refreshed_workspace() {
     let workspace = temp_dir("import_clone");
     let source = init_source_repo("source_repo");
@@ -380,6 +485,38 @@ fn import_project_adopts_existing_git_directory_and_blocks_plain_directory() {
     .unwrap();
     assert_eq!(blocked.task.status, TaskStatus::Failed);
     assert!(blocked.task.error.unwrap().contains("non-Git directory"));
+}
+
+#[test]
+fn import_project_blocks_explicit_directory_when_existing_remote_differs() {
+    let workspace = temp_dir("import_existing_remote_differs");
+    let existing = workspace.join("agent-skills");
+    std::fs::create_dir_all(&existing).unwrap();
+    git(&existing, &["init"]);
+    git(
+        &existing,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/first/agent-skills.git",
+        ],
+    );
+
+    let result = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: "second/agent-skills".to_string(),
+            directory_name: Some("agent-skills".to_string()),
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Failed);
+    assert!(result.task.error.unwrap().contains("different remote"));
 }
 
 #[test]
