@@ -161,6 +161,8 @@ pub struct ImportProjectRequest {
     pub source: String,
     pub directory_name: Option<String>,
     pub shallow: bool,
+    #[serde(default)]
+    pub skill_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

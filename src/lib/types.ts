@@ -114,6 +114,7 @@ export type ImportProjectRequest = {
   source: string;
   directoryName?: string;
   shallow: boolean;
+  skillPath?: string;
 };
 
 export type PullProjectRequest = {
@@ -240,6 +241,7 @@ export type CatalogRepository = {
   state: CatalogRepositoryState;
   branch?: string;
   shallow: boolean;
+  skillPath?: string;
   addedAt: string;
   updatedAt: string;
 };

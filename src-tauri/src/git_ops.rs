@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ use crate::{
     is_pull_all_eligible, load_user_config, run_workspace_task_background,
     run_workspace_task_blocking, scan_workspace_at, AgentProfile, ConfigError, GitStatus,
     ImportProjectRequest, Project, ProjectTaskRecord, PullAllProjectsRequest, PullProjectRequest,
-    TaskKind, TaskOperationResult, TaskOutcome, TaskStatus, Workspace, WorkspaceError,
+    TaskKind, TaskOperationResult, TaskOutcome, TaskRecord, TaskStatus, Workspace, WorkspaceError,
 };
 
 const IMPORT_CLONE_MAX_ATTEMPTS: usize = 3;
@@ -25,6 +25,7 @@ pub struct ImportProjectPlan {
     pub directory_name: String,
     pub target_path: String,
     pub will_clone: bool,
+    pub skill_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +50,14 @@ impl GitOperationError {
             kind: GitOperationErrorKind::InvalidDirectoryName,
             path: None,
             message: format!("Project directory name '{name}' is not a safe single path segment."),
+        }
+    }
+
+    fn invalid_skill_path(path: &str) -> Self {
+        Self {
+            kind: GitOperationErrorKind::InvalidRepository,
+            path: None,
+            message: format!("Skill path '{path}' is not a safe relative path."),
         }
     }
 
@@ -84,10 +93,31 @@ pub fn plan_import_project(
 ) -> Result<ImportProjectPlan, GitOperationError> {
     let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
         .map_err(GitOperationError::workspace)?;
-    let remote_url = normalize_import_source(&request.source)?;
-    let directory_name = match request.directory_name.as_ref() {
-        Some(directory_name) => safe_project_dir_name(directory_name)?,
-        None => infer_directory_name(&remote_url)?,
+    let normalized_source = normalize_import_source(&request.source)?;
+    let remote_url = normalized_source.remote_url;
+    let mut skill_path = request
+        .skill_path
+        .as_deref()
+        .map(safe_import_skill_path)
+        .transpose()?
+        .or(normalized_source.skill_path);
+    let directory_name = match request.directory_name.as_deref() {
+        Some(directory_name) => match safe_project_dir_name(directory_name) {
+            Ok(directory_name) => directory_name,
+            Err(error) => {
+                if skill_path.is_none() && looks_like_misplaced_skill_path(directory_name) {
+                    if let Ok(path) = safe_import_skill_path(directory_name) {
+                        skill_path = Some(path);
+                        infer_import_directory_name(&remote_url, skill_path.as_deref())?
+                    } else {
+                        return Err(error);
+                    }
+                } else {
+                    return Err(error);
+                }
+            }
+        },
+        None => infer_import_directory_name(&remote_url, skill_path.as_deref())?,
     };
     let target_path = workspace_root.join(&directory_name);
     let will_clone = !target_path.exists();
@@ -97,6 +127,7 @@ pub fn plan_import_project(
         directory_name,
         target_path: target_path.display().to_string(),
         will_clone,
+        skill_path,
     })
 }
 
@@ -114,72 +145,15 @@ pub fn import_project_at(
     let result_workspace_for_task = Arc::clone(&result_workspace);
     let workspace_root_for_task = workspace_root.clone();
 
-    let task = run_workspace_task_blocking(
+    let task = run_import_project_task(
+        false,
         workspace_root.display().to_string(),
-        TaskKind::ImportProject,
-        format!("Import {}", plan.directory_name),
-        move |context| {
-            let outcome = if target_path.exists() {
-                if is_git_repository(&target_path) {
-                    context.stdout(format!(
-                        "adopt existing Git directory: {}",
-                        plan.directory_name
-                    ));
-                    TaskOutcome::succeeded(format!("Adopted {}", plan.directory_name))
-                } else {
-                    TaskOutcome::failed(
-                        format!("Import blocked for {}", plan.directory_name),
-                        format!(
-                            "Target path '{}' is an existing non-Git directory.",
-                            target_path.display()
-                        ),
-                    )
-                }
-            } else {
-                let mut args = vec!["clone".to_string()];
-                if request.shallow {
-                    args.push("--depth".to_string());
-                    args.push("1".to_string());
-                }
-                args.push(plan.remote_url.clone());
-                args.push(plan.directory_name.clone());
-                context.stdout(format!("git {}", args.join(" ")));
-                match clone_with_retries(
-                    &workspace_root_for_task,
-                    &target_path,
-                    &args,
-                    IMPORT_CLONE_MAX_ATTEMPTS,
-                    IMPORT_CLONE_TIMEOUT,
-                    context,
-                ) {
-                    Ok((stdout, stderr)) => {
-                        TaskOutcome::succeeded(format!("Imported {}", plan.directory_name))
-                            .with_stdout(stdout)
-                            .with_stderr(stderr)
-                    }
-                    Err((stdout, stderr)) => TaskOutcome::failed(
-                        format!("Import failed for {}", plan.directory_name),
-                        stderr
-                            .lines()
-                            .next()
-                            .unwrap_or("git clone failed")
-                            .to_string(),
-                    )
-                    .with_stdout(stdout)
-                    .with_stderr(stderr),
-                }
-            };
-
-            if matches!(outcome.status(), crate::TaskStatus::Succeeded) {
-                if let Ok(workspace) = scan_workspace_at(&workspace_root_for_task, &profiles) {
-                    *result_workspace_for_task
-                        .lock()
-                        .expect("import result workspace lock poisoned") = Some(workspace);
-                }
-            }
-
-            outcome
-        },
+        plan,
+        target_path,
+        request.shallow,
+        profiles,
+        result_workspace_for_task,
+        workspace_root_for_task,
     );
 
     let workspace = result_workspace
@@ -198,13 +172,168 @@ pub fn import_project_at(
     Ok(TaskOperationResult { task, workspace })
 }
 
+pub fn import_project_background_at(
+    workspace_root: impl AsRef<Path>,
+    agent_profiles: &[AgentProfile],
+    request: ImportProjectRequest,
+) -> Result<TaskOperationResult, GitOperationError> {
+    let workspace_root = crate::validate_workspace_root(workspace_root.as_ref())
+        .map_err(GitOperationError::workspace)?;
+    let plan = plan_import_project(&workspace_root, &request)?;
+    let target_path = PathBuf::from(&plan.target_path);
+    let profiles = agent_profiles.to_vec();
+    let result_workspace = Arc::new(Mutex::new(None::<Workspace>));
+    let result_workspace_for_task = Arc::clone(&result_workspace);
+    let workspace_root_for_task = workspace_root.clone();
+
+    let task = run_import_project_task(
+        true,
+        workspace_root.display().to_string(),
+        plan,
+        target_path,
+        request.shallow,
+        profiles,
+        result_workspace_for_task,
+        workspace_root_for_task,
+    );
+
+    let workspace = result_workspace
+        .lock()
+        .expect("import result workspace lock poisoned")
+        .clone()
+        .unwrap_or_else(|| {
+            scan_workspace_at(&workspace_root, agent_profiles).unwrap_or_else(|_| Workspace {
+                root: workspace_root.display().to_string(),
+                projects: Vec::new(),
+                skills: Vec::new(),
+                agent_profiles: Vec::new(),
+            })
+        });
+
+    Ok(TaskOperationResult { task, workspace })
+}
+
+fn run_import_project_task(
+    background: bool,
+    workspace_root_display: String,
+    plan: ImportProjectPlan,
+    target_path: PathBuf,
+    shallow: bool,
+    profiles: Vec<AgentProfile>,
+    result_workspace_for_task: Arc<Mutex<Option<Workspace>>>,
+    workspace_root_for_task: PathBuf,
+) -> TaskRecord {
+    let summary = format!("Import {}", plan.directory_name);
+    let job = move |context: &mut crate::TaskContext| {
+        let outcome = if target_path.exists() {
+            if is_git_repository(&target_path) {
+                if let Some(skill_path) = plan.skill_path.as_deref() {
+                    if let Err(message) = ensure_sparse_skill_exists(&target_path, skill_path) {
+                        match add_skill_to_existing_sparse_checkout(
+                            &target_path,
+                            skill_path,
+                            IMPORT_CLONE_TIMEOUT,
+                            context,
+                        ) {
+                            Ok((stdout, stderr)) => {
+                                return TaskOutcome::succeeded(format!(
+                                    "Added {} to {}",
+                                    skill_path, plan.directory_name
+                                ))
+                                .with_stdout(stdout)
+                                .with_stderr(stderr);
+                            }
+                            Err((stdout, stderr)) => {
+                                return TaskOutcome::failed(
+                                    format!("Import blocked for {}", plan.directory_name),
+                                    stderr.lines().next().unwrap_or(&message).to_string(),
+                                )
+                                .with_stdout(stdout)
+                                .with_stderr(stderr);
+                            }
+                        }
+                    }
+                }
+                context.stdout(format!(
+                    "adopt existing Git directory: {}",
+                    plan.directory_name
+                ));
+                TaskOutcome::succeeded(format!("Adopted {}", plan.directory_name))
+            } else {
+                TaskOutcome::failed(
+                    format!("Import blocked for {}", plan.directory_name),
+                    format!(
+                        "Target path '{}' is an existing non-Git directory.",
+                        target_path.display()
+                    ),
+                )
+            }
+        } else {
+            match clone_import_project(
+                &workspace_root_for_task,
+                &target_path,
+                &plan.remote_url,
+                &plan.directory_name,
+                plan.skill_path.as_deref(),
+                None,
+                shallow,
+                IMPORT_CLONE_MAX_ATTEMPTS,
+                IMPORT_CLONE_TIMEOUT,
+                context,
+            ) {
+                Ok((stdout, stderr)) => {
+                    TaskOutcome::succeeded(format!("Imported {}", plan.directory_name))
+                        .with_stdout(stdout)
+                        .with_stderr(stderr)
+                }
+                Err((stdout, stderr)) => TaskOutcome::failed(
+                    format!("Import failed for {}", plan.directory_name),
+                    stderr
+                        .lines()
+                        .next()
+                        .unwrap_or("git clone failed")
+                        .to_string(),
+                )
+                .with_stdout(stdout)
+                .with_stderr(stderr),
+            }
+        };
+
+        if matches!(outcome.status(), crate::TaskStatus::Succeeded) {
+            if let Ok(workspace) = scan_workspace_at(&workspace_root_for_task, &profiles) {
+                *result_workspace_for_task
+                    .lock()
+                    .expect("import result workspace lock poisoned") = Some(workspace);
+            }
+        }
+
+        outcome
+    };
+
+    if background {
+        run_workspace_task_background(
+            workspace_root_display,
+            TaskKind::ImportProject,
+            summary,
+            job,
+        )
+    } else {
+        run_workspace_task_blocking(
+            workspace_root_display,
+            TaskKind::ImportProject,
+            summary,
+            job,
+        )
+    }
+}
+
 #[cfg_attr(feature = "desktop", tauri::command(async, rename_all = "camelCase"))]
 pub fn import_project_command(
     workspace_root: String,
     request: ImportProjectRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
     let user_config = load_user_config().map_err(GitOperationError::config)?;
-    import_project_at(workspace_root, &user_config.agent_profiles, request)
+    import_project_background_at(workspace_root, &user_config.agent_profiles, request)
 }
 
 pub fn delete_project_at(
@@ -999,7 +1128,12 @@ impl WithProjectError for ProjectTaskOutcome {
     }
 }
 
-fn normalize_import_source(source: &str) -> Result<String, GitOperationError> {
+struct NormalizedImportSource {
+    remote_url: String,
+    skill_path: Option<String>,
+}
+
+fn normalize_import_source(source: &str) -> Result<NormalizedImportSource, GitOperationError> {
     let source = source.trim();
     if source.is_empty() {
         return Err(GitOperationError::invalid_repository(
@@ -1008,10 +1142,57 @@ fn normalize_import_source(source: &str) -> Result<String, GitOperationError> {
     }
 
     if is_github_shorthand(source) {
-        return Ok(format!("https://github.com/{source}.git"));
+        return Ok(NormalizedImportSource {
+            remote_url: format!("https://github.com/{source}.git"),
+            skill_path: None,
+        });
     }
 
-    Ok(source.to_string())
+    if let Some(normalized) = parse_github_tree_source(source)? {
+        return Ok(normalized);
+    }
+
+    Ok(NormalizedImportSource {
+        remote_url: source.to_string(),
+        skill_path: None,
+    })
+}
+
+fn parse_github_tree_source(
+    source: &str,
+) -> Result<Option<NormalizedImportSource>, GitOperationError> {
+    let Some(rest) = source
+        .strip_prefix("https://github.com/")
+        .or_else(|| source.strip_prefix("http://github.com/"))
+    else {
+        return Ok(None);
+    };
+    let path = rest
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_matches('/');
+    let parts = path.split('/').collect::<Vec<_>>();
+    if parts.len() < 5 || !matches!(parts[2], "tree" | "blob") {
+        return Ok(None);
+    }
+    let owner = parts[0];
+    let repo = parts[1].trim_end_matches(".git");
+    if owner.is_empty() || repo.is_empty() {
+        return Ok(None);
+    }
+    let skill_path = parts[4..].join("/");
+    Ok(Some(NormalizedImportSource {
+        remote_url: format!("https://github.com/{owner}/{repo}.git"),
+        skill_path: Some(safe_import_skill_path(&skill_path)?),
+    }))
+}
+
+fn looks_like_misplaced_skill_path(path: &str) -> bool {
+    matches!(
+        Path::new(path).components().next(),
+        Some(Component::Normal(first)) if first == "skills"
+    )
 }
 
 fn is_github_shorthand(source: &str) -> bool {
@@ -1035,6 +1216,46 @@ fn infer_directory_name(remote_url: &str) -> Result<String, GitOperationError> {
     safe_project_dir_name(name)
 }
 
+fn infer_import_directory_name(
+    remote_url: &str,
+    skill_path: Option<&str>,
+) -> Result<String, GitOperationError> {
+    let directory_name = infer_directory_name(remote_url)?;
+    let Some(skill_path) = skill_path else {
+        return Ok(directory_name);
+    };
+    let first_component = Path::new(skill_path)
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Normal(component) => component.to_str(),
+            _ => None,
+        });
+    if first_component != Some(directory_name.as_str()) {
+        return Ok(directory_name);
+    }
+    let Some((owner, repo)) = github_owner_repo_from_remote_url(remote_url) else {
+        return Ok(directory_name);
+    };
+    safe_project_dir_name(&format!("{owner}-{repo}"))
+}
+
+fn github_owner_repo_from_remote_url(remote_url: &str) -> Option<(String, String)> {
+    let trimmed = remote_url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let path = trimmed
+        .strip_prefix("https://github.com/")
+        .or_else(|| trimmed.strip_prefix("http://github.com/"))
+        .or_else(|| trimmed.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| trimmed.strip_prefix("git@github.com:"))?;
+    let mut parts = path.split('/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim();
+    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
+}
+
 pub(crate) fn safe_project_dir_name(name: &str) -> Result<String, GitOperationError> {
     let name = name.trim();
     if name.is_empty()
@@ -1049,6 +1270,33 @@ pub(crate) fn safe_project_dir_name(name: &str) -> Result<String, GitOperationEr
         return Err(GitOperationError::invalid_directory_name(name));
     }
     Ok(name.to_string())
+}
+
+pub(crate) fn safe_import_skill_path(path: &str) -> Result<String, GitOperationError> {
+    let path = path.trim();
+    let relative = Path::new(path);
+    if path.is_empty()
+        || path.contains('\0')
+        || path.contains('\\')
+        || path.split('/').any(|part| part.is_empty() || part == ".")
+        || relative.is_absolute()
+        || relative.components().count() == 0
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        })
+        || relative.components().any(|component| {
+            component.as_os_str() == ".git" || component.as_os_str() == "node_modules"
+        })
+    {
+        return Err(GitOperationError::invalid_skill_path(path));
+    }
+    Ok(relative.to_string_lossy().to_string())
 }
 
 fn is_git_repository(path: &Path) -> bool {
@@ -1097,6 +1345,212 @@ pub(crate) fn clone_with_retries(
     }
 
     Err((combined_stdout, combined_stderr))
+}
+
+pub(crate) fn clone_import_project(
+    workspace_root: &Path,
+    target_path: &Path,
+    remote_url: &str,
+    directory_name: &str,
+    skill_path: Option<&str>,
+    branch: Option<&str>,
+    shallow: bool,
+    max_attempts: usize,
+    timeout: Duration,
+    context: &mut crate::TaskContext,
+) -> Result<(String, String), (String, String)> {
+    let staging_path = create_import_staging_path(workspace_root, directory_name)?;
+    let mut args = vec!["clone".to_string()];
+    if skill_path.is_some() {
+        args.push("--sparse".to_string());
+    }
+    if shallow {
+        args.push("--depth".to_string());
+        args.push("1".to_string());
+    }
+    if let Some(branch) = branch.filter(|branch| !branch.is_empty()) {
+        args.push("--branch".to_string());
+        args.push(branch.to_string());
+    }
+    args.push(remote_url.to_string());
+    args.push(staging_path.display().to_string());
+    context.stdout(format!("git {}", args.join(" ")));
+
+    let (mut stdout, mut stderr) = clone_with_retries(
+        workspace_root,
+        &staging_path,
+        &args,
+        max_attempts,
+        timeout,
+        context,
+    )?;
+
+    if let Some(skill_path) = skill_path {
+        let set_args = vec![
+            "sparse-checkout".to_string(),
+            "set".to_string(),
+            "--cone".to_string(),
+            skill_path.to_string(),
+        ];
+        context.stdout(format!(
+            "git -C {} {}",
+            staging_path.display(),
+            set_args.join(" ")
+        ));
+        match git_command_output_with_timeout(&staging_path, &set_args, timeout) {
+            Ok((set_stdout, set_stderr)) => {
+                append_log(&mut stdout, &set_stdout);
+                append_log(&mut stderr, &set_stderr);
+            }
+            Err((set_stdout, set_stderr)) => {
+                append_log(&mut stdout, &set_stdout);
+                append_log(&mut stderr, &set_stderr);
+                if let Err(error) = remove_partial_import_target(&staging_path) {
+                    append_log(&mut stderr, &error);
+                    context.stderr(error);
+                }
+                return Err((stdout, stderr));
+            }
+        }
+        if let Err(message) = ensure_sparse_skill_exists(&staging_path, skill_path) {
+            append_log(&mut stderr, &message);
+            if let Err(error) = remove_partial_import_target(&staging_path) {
+                append_log(&mut stderr, &error);
+                context.stderr(error);
+            }
+            return Err((stdout, stderr));
+        }
+    }
+
+    if target_path.exists() {
+        let message = format!(
+            "Target path '{}' appeared while import was running.",
+            target_path.display()
+        );
+        append_log(&mut stderr, &message);
+        if let Err(error) = remove_partial_import_target(&staging_path) {
+            append_log(&mut stderr, &error);
+            context.stderr(error);
+        }
+        return Err((stdout, stderr));
+    }
+    if let Err(error) = fs::rename(&staging_path, target_path) {
+        let message = format!(
+            "failed to move staged import '{}' to '{}': {error}",
+            staging_path.display(),
+            target_path.display()
+        );
+        append_log(&mut stderr, &message);
+        if let Err(cleanup_error) = remove_partial_import_target(&staging_path) {
+            append_log(&mut stderr, &cleanup_error);
+            context.stderr(cleanup_error);
+        }
+        return Err((stdout, stderr));
+    }
+    append_log(
+        &mut stdout,
+        &format!("promoted staged import to {}", target_path.display()),
+    );
+
+    Ok((stdout, stderr))
+}
+
+fn create_import_staging_path(
+    workspace_root: &Path,
+    directory_name: &str,
+) -> Result<PathBuf, (String, String)> {
+    let imports_dir = workspace_root.join(".skilldock").join("imports");
+    fs::create_dir_all(&imports_dir).map_err(|error| {
+        (
+            String::new(),
+            format!(
+                "failed to create import staging directory '{}': {error}",
+                imports_dir.display()
+            ),
+        )
+    })?;
+    for attempt in 0..100 {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = imports_dir.join(format!(
+            "{}-{}-{}",
+            directory_name,
+            std::process::id(),
+            suffix + attempt
+        ));
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+    Err((
+        String::new(),
+        "failed to allocate an import staging directory".to_string(),
+    ))
+}
+
+fn ensure_sparse_skill_exists(project_path: &Path, skill_path: &str) -> Result<(), String> {
+    let skill_md = project_path.join(skill_path).join("SKILL.md");
+    if skill_md.is_file() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Skill path '{}' does not contain SKILL.md after checkout.",
+            skill_path
+        ))
+    }
+}
+
+fn add_skill_to_existing_sparse_checkout(
+    project_path: &Path,
+    skill_path: &str,
+    timeout: Duration,
+    context: &mut crate::TaskContext,
+) -> Result<(String, String), (String, String)> {
+    if !is_sparse_checkout(project_path) {
+        return Err((
+            String::new(),
+            format!(
+                "Skill path '{}' does not contain SKILL.md in the existing Git directory.",
+                skill_path
+            ),
+        ));
+    }
+
+    let args = vec![
+        "sparse-checkout".to_string(),
+        "add".to_string(),
+        skill_path.to_string(),
+    ];
+    context.stdout(format!(
+        "git -C {} {}",
+        project_path.display(),
+        args.join(" ")
+    ));
+    let (mut stdout, mut stderr) = git_command_output_with_timeout(project_path, &args, timeout)?;
+    if let Err(message) = ensure_sparse_skill_exists(project_path, skill_path) {
+        append_log(&mut stderr, &message);
+        return Err((stdout, stderr));
+    }
+    append_log(
+        &mut stdout,
+        &format!("added sparse skill path: {}", skill_path),
+    );
+    Ok((stdout, stderr))
+}
+
+fn is_sparse_checkout(project_path: &Path) -> bool {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(project_path)
+        .args(["config", "--bool", "core.sparseCheckout"])
+        .output();
+    output
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "true")
+        .unwrap_or(false)
 }
 
 pub(crate) fn git_command_output_with_timeout(

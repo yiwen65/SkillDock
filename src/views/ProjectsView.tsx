@@ -72,7 +72,7 @@ export const ProjectsView = memo(function ProjectsView({
 }: {
   onCheckAll: () => void;
   onCheckProject: (projectId: string) => void;
-  onImport: (source: string, directoryName: string, shallow: boolean) => void;
+  onImport: (source: string, directoryName: string, shallow: boolean, skillPath: string) => void;
   onOpenTaskLog: (taskId: string) => void;
   onPullAll: (autostash: boolean) => void;
   onPullProject: (projectId: string, autostash: boolean) => void;
@@ -85,6 +85,7 @@ export const ProjectsView = memo(function ProjectsView({
 }) {
   const [source, setSource] = useState("");
   const [directoryName, setDirectoryName] = useState("");
+  const [skillPath, setSkillPath] = useState("");
   const [shallow, setShallow] = useState(false);
   const [autostash, setAutostash] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -191,9 +192,10 @@ export const ProjectsView = memo(function ProjectsView({
 
   const submitImport = () => {
     if (!source.trim()) return;
-    onImport(source.trim(), directoryName.trim(), shallow);
+    onImport(source.trim(), directoryName.trim(), shallow, skillPath.trim());
     setSource("");
     setDirectoryName("");
+    setSkillPath("");
     setShallow(false);
     setImportOpen(false);
   };
@@ -237,61 +239,18 @@ export const ProjectsView = memo(function ProjectsView({
         </div>
       )}
       {importOpen && (
-        <div className="dialog-backdrop" role="presentation">
-          <form
-            aria-modal="true"
-            className="data-panel compact-form import-dialog"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitImport();
-            }}
-            role="dialog"
-          >
-            <PanelHeader title="Import repository" detail="GitHub shorthand or Git URL" />
-            <label>
-              <span>Repository</span>
-              <input
-                autoFocus
-                onChange={(event) => setSource(event.target.value)}
-                placeholder="owner/repo or https://..."
-                value={source}
-              />
-            </label>
-            <details open>
-              <summary>Advanced options</summary>
-              <div className="advanced-options">
-                <label>
-                  <span>Directory name</span>
-                  <input
-                    onChange={(event) => setDirectoryName(event.target.value)}
-                    placeholder="Optional"
-                    value={directoryName}
-                  />
-                </label>
-                <label className="inline-check">
-                  <input
-                    checked={shallow}
-                    onChange={(event) => setShallow(event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>Shallow clone</span>
-                </label>
-              </div>
-            </details>
-            <div className="panel-actions">
-              <button className="primary-button" type="submit">
-                Import
-              </button>
-              <button
-                className="secondary-button"
-                onClick={() => setImportOpen(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
+        <ProjectImportDialog
+          directoryName={directoryName}
+          onCancel={() => setImportOpen(false)}
+          onDirectoryNameChange={setDirectoryName}
+          onShallowChange={setShallow}
+          onSkillPathChange={setSkillPath}
+          onSourceChange={setSource}
+          onSubmit={submitImport}
+          shallow={shallow}
+          skillPath={skillPath}
+          source={source}
+        />
       )}
       <section className="data-panel">
         <PanelHeader
@@ -478,3 +437,89 @@ export const ProjectsView = memo(function ProjectsView({
     </>
   );
 });
+
+export function ProjectImportDialog({
+  directoryName,
+  onCancel,
+  onDirectoryNameChange,
+  onShallowChange,
+  onSkillPathChange,
+  onSourceChange,
+  onSubmit,
+  shallow,
+  skillPath,
+  source,
+}: {
+  directoryName: string;
+  onCancel: () => void;
+  onDirectoryNameChange: (value: string) => void;
+  onShallowChange: (value: boolean) => void;
+  onSkillPathChange: (value: string) => void;
+  onSourceChange: (value: string) => void;
+  onSubmit: () => void;
+  shallow: boolean;
+  skillPath: string;
+  source: string;
+}) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <form
+        aria-modal="true"
+        className="data-panel compact-form import-dialog"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+        role="dialog"
+      >
+        <PanelHeader title="Import repository" detail="GitHub shorthand or Git URL" />
+        <label>
+          <span>Repository</span>
+          <input
+            autoFocus
+            onChange={(event) => onSourceChange(event.target.value)}
+            placeholder="owner/repo or https://..."
+            value={source}
+          />
+        </label>
+        <details open>
+          <summary>Advanced options</summary>
+          <div className="advanced-options">
+            <label>
+              <span>Directory name</span>
+              <input
+                onChange={(event) => onDirectoryNameChange(event.target.value)}
+                placeholder="Optional, e.g. awesome-copilot"
+                value={directoryName}
+              />
+            </label>
+            <label>
+              <span>Skill path</span>
+              <input
+                onChange={(event) => onSkillPathChange(event.target.value)}
+                placeholder="Optional, e.g. skills/github-release"
+                value={skillPath}
+              />
+            </label>
+            <label className="inline-check">
+              <input
+                checked={shallow}
+                onChange={(event) => onShallowChange(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Shallow clone</span>
+            </label>
+          </div>
+        </details>
+        <div className="panel-actions">
+          <button className="primary-button" type="submit">
+            Import
+          </button>
+          <button className="secondary-button" onClick={onCancel} type="button">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

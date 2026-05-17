@@ -3,10 +3,10 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use skilldock_lib::{
-    initialize_catalog_git_sync_at, load_workspace_catalog_summary_at, publish_catalog_git_sync_at,
-    pull_catalog_git_sync_at, restore_missing_catalog_repositories_at,
-    restore_missing_catalog_repositories_background_at, task_queue,
-    sync_workspace_catalog_from_projects_at, TaskStatus,
+    import_project_at, initialize_catalog_git_sync_at, load_workspace_catalog_summary_at,
+    publish_catalog_git_sync_at, pull_catalog_git_sync_at, restore_missing_catalog_repositories_at,
+    restore_missing_catalog_repositories_background_at, sync_workspace_catalog_from_projects_at,
+    task_queue, ImportProjectRequest, TaskStatus,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -47,6 +47,16 @@ fn init_source_repo(name: &str) -> PathBuf {
     git(&source, &["add", "README.md"]);
     git(&source, &["commit", "-m", "initial"]);
     source
+}
+
+fn add_skill(repo: &Path, relative_path: &str, name: &str) {
+    let skill_dir = repo.join(relative_path);
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: {name} skill\n---\n"),
+    )
+    .unwrap();
 }
 
 fn clone_project(remote: &Path, workspace: &Path, name: &str) -> PathBuf {
@@ -104,6 +114,7 @@ fn catalog_sync_from_projects_writes_portable_repository_records() {
         after.repositories[0].remote_url,
         source.display().to_string()
     );
+    assert_eq!(after.repositories[0].skill_path, None);
     assert!(workspace.join(".skilldock/catalog/repos").is_dir());
 }
 
@@ -123,6 +134,7 @@ fn restore_missing_catalog_repositories_clones_catalog_entries_on_new_workspace(
     let before = load_workspace_catalog_summary_at(&new_workspace, &[]).unwrap();
     assert_eq!(before.active_count, 1);
     assert_eq!(before.missing_count, 1);
+    assert_eq!(before.repositories[0].skill_path, None);
 
     let result = restore_missing_catalog_repositories_at(&new_workspace, &[]).unwrap();
 
@@ -133,6 +145,87 @@ fn restore_missing_catalog_repositories_clones_catalog_entries_on_new_workspace(
         .projects
         .iter()
         .any(|project| project.id == "restored-project"));
+}
+
+#[test]
+fn catalog_sync_persists_sparse_skill_path_for_selective_imports() {
+    let workspace = temp_dir("sync_sparse_project");
+    let source = init_source_repo("sync_sparse_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    add_skill(&source, "skills/other", "Other");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skills"]);
+
+    let imported = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("sparse-project".to_string()),
+            shallow: false,
+            skill_path: Some("skills/tdd".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(imported.task.status, TaskStatus::Succeeded);
+
+    let summary = sync_workspace_catalog_from_projects_at(&workspace, &[]).unwrap();
+
+    assert_eq!(summary.active_count, 1);
+    assert_eq!(summary.repositories[0].directory_name, "sparse-project");
+    assert_eq!(
+        summary.repositories[0].skill_path,
+        Some("skills/tdd".to_string())
+    );
+}
+
+#[test]
+fn restore_missing_catalog_repositories_recreates_sparse_skill_imports() {
+    let source = init_source_repo("restore_sparse_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    add_skill(&source, "skills/other", "Other");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skills"]);
+
+    let old_workspace = temp_dir("restore_sparse_old_workspace");
+    import_project_at(
+        &old_workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("restored-sparse".to_string()),
+            shallow: false,
+            skill_path: Some("skills/tdd".to_string()),
+        },
+    )
+    .unwrap();
+    sync_workspace_catalog_from_projects_at(&old_workspace, &[]).unwrap();
+
+    let new_workspace = temp_dir("restore_sparse_new_workspace");
+    copy_dir_all(
+        &old_workspace.join(".skilldock"),
+        &new_workspace.join(".skilldock"),
+    );
+
+    let result = restore_missing_catalog_repositories_at(&new_workspace, &[]).unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Succeeded);
+    assert!(new_workspace
+        .join("restored-sparse/skills/tdd/SKILL.md")
+        .is_file());
+    assert!(!new_workspace
+        .join("restored-sparse/skills/other/SKILL.md")
+        .exists());
+    assert!(result
+        .workspace
+        .skills
+        .iter()
+        .any(|skill| skill.id == "restored-sparse/skills/tdd"));
+    assert!(!result
+        .workspace
+        .skills
+        .iter()
+        .any(|skill| skill.id == "restored-sparse/skills/other"));
 }
 
 #[test]
@@ -186,7 +279,10 @@ fn restore_missing_catalog_repositories_command_queues_long_clone_work() {
         let status = task_queue().get_task_status(&result.task.id).unwrap();
         if matches!(
             status.status,
-            TaskStatus::Succeeded | TaskStatus::Skipped | TaskStatus::Failed | TaskStatus::Cancelled
+            TaskStatus::Succeeded
+                | TaskStatus::Skipped
+                | TaskStatus::Failed
+                | TaskStatus::Cancelled
         ) {
             assert_eq!(status.status, TaskStatus::Succeeded);
             assert!(new_workspace.join("background-project/.git").exists());

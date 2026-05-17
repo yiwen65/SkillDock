@@ -9,10 +9,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    clone_with_retries, git_command_output_with_timeout, load_user_config,
-    run_workspace_task_background, run_workspace_task_blocking, safe_project_dir_name,
-    scan_workspace_at, AgentProfile, ConfigError, GitOperationError, Project, ProjectTaskRecord,
-    TaskKind, TaskOperationResult, TaskOutcome, TaskStatus, Workspace, WorkspaceError,
+    clone_import_project, git_command_output_with_timeout, load_user_config,
+    run_workspace_task_background, run_workspace_task_blocking, safe_import_skill_path,
+    safe_project_dir_name, scan_workspace_at, AgentProfile, ConfigError, GitOperationError,
+    Project, ProjectTaskRecord, TaskKind, TaskOperationResult, TaskOutcome, TaskStatus, Workspace,
+    WorkspaceError,
 };
 
 const CATALOG_SCHEMA_VERSION: u32 = 1;
@@ -33,6 +34,8 @@ pub struct CatalogRepository {
     pub state: CatalogRepositoryState,
     pub branch: Option<String>,
     pub shallow: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_path: Option<String>,
     pub added_at: String,
     pub updated_at: String,
 }
@@ -201,6 +204,7 @@ pub fn sync_workspace_catalog_from_projects_at(
                 state: CatalogRepositoryState::Active,
                 branch: None,
                 shallow: false,
+                skill_path: None,
                 added_at: now.clone(),
                 updated_at: now.clone(),
             });
@@ -208,6 +212,7 @@ pub fn sync_workspace_catalog_from_projects_at(
         record.remote_url = remote_url.clone();
         record.directory_name = project.id.clone();
         record.state = CatalogRepositoryState::Active;
+        record.skill_path = sparse_skill_path_for_project(project);
         record.updated_at = now.clone();
         save_catalog_repository(&workspace_root, &record)?;
         remove_catalog_tombstone(&workspace_root, &record.id)?;
@@ -275,114 +280,106 @@ fn restore_missing_catalog_repositories_with_mode(
     let workspace_root_for_task_record = workspace_root.display().to_string();
     let summary = format!("Restore {} catalog repositories", missing.len());
     let job = move |context: &mut crate::TaskContext| {
-            if missing.is_empty() {
-                return TaskOutcome::skipped("No missing catalog repositories.");
+        if missing.is_empty() {
+            return TaskOutcome::skipped("No missing catalog repositories.");
+        }
+
+        let mut ok = 0usize;
+        let mut skipped = 0usize;
+        let mut failed = 0usize;
+        let mut cancelled = false;
+        let mut project_outcomes = Vec::new();
+
+        for item in &missing {
+            if context.is_cancelled() {
+                cancelled = true;
+                context.stderr("cancelled after current repository");
+                break;
             }
 
-            let mut ok = 0usize;
-            let mut skipped = 0usize;
-            let mut failed = 0usize;
-            let mut cancelled = false;
-            let mut project_outcomes = Vec::new();
-
-            for item in &missing {
-                if context.is_cancelled() {
-                    cancelled = true;
-                    context.stderr("cancelled after current repository");
-                    break;
-                }
-
-                let target_path = workspace_root_for_task.join(&item.directory_name);
-                let mut outcome = ProjectTaskRecord {
-                    project_id: item.directory_name.clone(),
-                    status: TaskStatus::Failed,
-                    summary: "restore failed".to_string(),
-                    error: None,
-                };
-
-                if target_path.exists() {
-                    outcome.status = TaskStatus::Skipped;
-                    outcome.summary = "target path already exists".to_string();
-                    outcome.error = Some(format!(
-                        "Target path '{}' already exists but is not a matching Git repository.",
-                        target_path.display()
-                    ));
-                    context.stderr(outcome.error.clone().unwrap_or_default());
-                    skipped += 1;
-                    project_outcomes.push(outcome);
-                    continue;
-                }
-
-                let mut args = vec!["clone".to_string()];
-                if item.remote_url.is_empty() {
-                    outcome.error = Some("Catalog repository has an empty remote URL.".to_string());
-                    context.stderr(outcome.error.clone().unwrap_or_default());
-                    failed += 1;
-                    project_outcomes.push(outcome);
-                    continue;
-                }
-                if item.shallow {
-                    args.push("--depth".to_string());
-                    args.push("1".to_string());
-                }
-                if let Some(branch) = item.branch.as_ref().filter(|branch| !branch.is_empty()) {
-                    args.push("--branch".to_string());
-                    args.push(branch.clone());
-                }
-                args.push(item.remote_url.clone());
-                args.push(item.directory_name.clone());
-                context.stdout(format!("git {}", args.join(" ")));
-                match clone_with_retries(
-                    &workspace_root_for_task,
-                    &target_path,
-                    &args,
-                    RESTORE_CLONE_MAX_ATTEMPTS,
-                    RESTORE_CLONE_TIMEOUT,
-                    context,
-                ) {
-                    Ok((stdout, stderr)) => {
-                        context.stdout(stdout);
-                        context.stderr(stderr);
-                        outcome.status = TaskStatus::Succeeded;
-                        outcome.summary = "restored".to_string();
-                        ok += 1;
-                    }
-                    Err((stdout, stderr)) => {
-                        context.stdout(stdout);
-                        context.stderr(&stderr);
-                        outcome.status = TaskStatus::Failed;
-                        outcome.summary = "clone failed".to_string();
-                        outcome.error = Some(
-                            stderr
-                                .lines()
-                                .next()
-                                .unwrap_or("git clone failed")
-                                .to_string(),
-                        );
-                        failed += 1;
-                    }
-                }
-                project_outcomes.push(outcome);
-            }
-
-            if let Ok(workspace) = scan_workspace_at(&workspace_root_for_task, &profiles) {
-                *result_workspace_for_task
-                    .lock()
-                    .expect("catalog restore result workspace lock poisoned") = Some(workspace);
-            }
-
-            let summary = format!("summary: ok={ok} skipped={skipped} failed={failed}");
-            context.stdout(&summary);
-            let outcome = if cancelled {
-                TaskOutcome::cancelled(format!("Task cancelled. {summary}"))
-            } else if failed > 0 {
-                TaskOutcome::failed("Some catalog repositories failed to restore", summary)
-            } else if ok == 0 {
-                TaskOutcome::skipped(summary)
-            } else {
-                TaskOutcome::succeeded(summary)
+            let target_path = workspace_root_for_task.join(&item.directory_name);
+            let mut outcome = ProjectTaskRecord {
+                project_id: item.directory_name.clone(),
+                status: TaskStatus::Failed,
+                summary: "restore failed".to_string(),
+                error: None,
             };
-            outcome.with_project_outcomes(project_outcomes)
+
+            if target_path.exists() {
+                outcome.status = TaskStatus::Skipped;
+                outcome.summary = "target path already exists".to_string();
+                outcome.error = Some(format!(
+                    "Target path '{}' already exists but is not a matching Git repository.",
+                    target_path.display()
+                ));
+                context.stderr(outcome.error.clone().unwrap_or_default());
+                skipped += 1;
+                project_outcomes.push(outcome);
+                continue;
+            }
+
+            if item.remote_url.is_empty() {
+                outcome.error = Some("Catalog repository has an empty remote URL.".to_string());
+                context.stderr(outcome.error.clone().unwrap_or_default());
+                failed += 1;
+                project_outcomes.push(outcome);
+                continue;
+            }
+            match clone_import_project(
+                &workspace_root_for_task,
+                &target_path,
+                &item.remote_url,
+                &item.directory_name,
+                item.skill_path.as_deref(),
+                item.branch.as_deref(),
+                item.shallow,
+                RESTORE_CLONE_MAX_ATTEMPTS,
+                RESTORE_CLONE_TIMEOUT,
+                context,
+            ) {
+                Ok((stdout, stderr)) => {
+                    context.stdout(stdout);
+                    context.stderr(stderr);
+                    outcome.status = TaskStatus::Succeeded;
+                    outcome.summary = "restored".to_string();
+                    ok += 1;
+                }
+                Err((stdout, stderr)) => {
+                    context.stdout(stdout);
+                    context.stderr(&stderr);
+                    outcome.status = TaskStatus::Failed;
+                    outcome.summary = "clone failed".to_string();
+                    outcome.error = Some(
+                        stderr
+                            .lines()
+                            .next()
+                            .unwrap_or("git clone failed")
+                            .to_string(),
+                    );
+                    failed += 1;
+                }
+            }
+            project_outcomes.push(outcome);
+        }
+
+        if let Ok(workspace) = scan_workspace_at(&workspace_root_for_task, &profiles) {
+            *result_workspace_for_task
+                .lock()
+                .expect("catalog restore result workspace lock poisoned") = Some(workspace);
+        }
+
+        let summary = format!("summary: ok={ok} skipped={skipped} failed={failed}");
+        context.stdout(&summary);
+        let outcome = if cancelled {
+            TaskOutcome::cancelled(format!("Task cancelled. {summary}"))
+        } else if failed > 0 {
+            TaskOutcome::failed("Some catalog repositories failed to restore", summary)
+        } else if ok == 0 {
+            TaskOutcome::skipped(summary)
+        } else {
+            TaskOutcome::succeeded(summary)
+        };
+        outcome.with_project_outcomes(project_outcomes)
     };
     let task = if background {
         run_workspace_task_background(
@@ -722,6 +719,30 @@ fn local_only_comparison(
     })
 }
 
+fn sparse_skill_path_for_project(project: &Project) -> Option<String> {
+    let project_path = Path::new(&project.path);
+    let (stdout, _) = git_command_output_with_timeout(
+        project_path,
+        &["sparse-checkout".to_string(), "list".to_string()],
+        CATALOG_GIT_TIMEOUT,
+    )
+    .ok()?;
+    let paths = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if paths.len() != 1 {
+        return None;
+    }
+    let skill_path = safe_import_skill_path(paths[0]).ok()?;
+    if project_path.join(&skill_path).join("SKILL.md").is_file() {
+        Some(skill_path)
+    } else {
+        None
+    }
+}
+
 fn load_catalog_repositories(
     workspace_root: &Path,
 ) -> Result<Vec<CatalogRepository>, CatalogError> {
@@ -753,6 +774,9 @@ fn load_catalog_repositories(
                 ));
             }
             safe_project_dir_name(&record.directory_name).map_err(CatalogError::git_operation)?;
+            if let Some(skill_path) = record.skill_path.as_deref() {
+                safe_import_skill_path(skill_path).map_err(CatalogError::git_operation)?;
+            }
             records.push(record);
         }
     }
@@ -891,7 +915,10 @@ fn unix_timestamp() -> String {
 fn git_output(path: &Path, args: &[&str]) -> Result<(String, String), CatalogError> {
     git_output_owned(
         path,
-        &args.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>(),
+        &args
+            .iter()
+            .map(|arg| (*arg).to_string())
+            .collect::<Vec<_>>(),
     )
 }
 
