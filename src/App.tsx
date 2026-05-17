@@ -321,9 +321,13 @@ function App() {
 
   const refreshWorkspaceAfterTerminalProjectTask = async (record: TaskRecord) => {
     if (
-      !["fetch_project", "pull_project", "sync_all_projects", "restore_catalog"].includes(
-        record.kind,
-      ) ||
+      ![
+        "import_project",
+        "fetch_project",
+        "pull_project",
+        "sync_all_projects",
+        "restore_catalog",
+      ].includes(record.kind) ||
       !record.workspaceRoot ||
       !isTerminalTaskStatus(record.status) ||
       workspaceRefreshTaskIdsRef.current.has(record.id)
@@ -482,12 +486,13 @@ function App() {
   );
 
   const handleImport = useCallback(
-    (source: string, directoryName: string, shallow: boolean) =>
+    (source: string, directoryName: string, shallow: boolean, skillPath: string) =>
       runWorkspaceOperationRef.current("Importing repository", (workspace) =>
         importProject(workspace.root, {
           source,
           directoryName: directoryName || undefined,
           shallow,
+          skillPath: skillPath || undefined,
         }),
       ),
     [],

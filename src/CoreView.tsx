@@ -37,7 +37,7 @@ export const CoreView = React.memo(function CoreView({
   activeView: ViewName;
   onCheckAll: () => void;
   onCheckProject: (projectId: string) => void;
-  onImport: (source: string, directoryName: string, shallow: boolean) => void;
+  onImport: (source: string, directoryName: string, shallow: boolean, skillPath: string) => void;
   onCreateAgentDir: (profile: AgentProfileState) => Promise<void> | void;
   onBatchLinkResult: (result: BatchLinkOperationResult) => void;
   onOperationResult: (result: TaskOperationResult) => void;

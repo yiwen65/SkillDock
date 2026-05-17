@@ -345,6 +345,14 @@ fn scan_workspace_finds_skills_with_frontmatter_fallbacks_and_resource_flags() {
         .join("ignored");
     std::fs::create_dir_all(&ignored_node_dir).unwrap();
     std::fs::write(ignored_node_dir.join("SKILL.md"), "# Ignored\n").unwrap();
+    let ignored_staging_dir = workspace_root
+        .join(".skilldock")
+        .join("imports")
+        .join("staged-repo")
+        .join("skills")
+        .join("ignored");
+    std::fs::create_dir_all(&ignored_staging_dir).unwrap();
+    std::fs::write(ignored_staging_dir.join("SKILL.md"), "# Ignored\n").unwrap();
 
     let workspace = scan_workspace_at(&workspace_root, &[]).unwrap();
 

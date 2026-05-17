@@ -143,7 +143,7 @@ try {
   const { CoreView } = await server.ssrLoadModule("/src/CoreView.tsx");
   const { catalogActionState, normalizeProfileDrafts, validateProfileDrafts } =
     await server.ssrLoadModule("/src/views/SettingsView.tsx");
-  const { buildLatestProjectErrorIndex } = await server.ssrLoadModule(
+  const { buildLatestProjectErrorIndex, ProjectImportDialog } = await server.ssrLoadModule(
     "/src/views/ProjectsView.tsx",
   );
   const { applyThemePreference, mergeTaskRecords, preserveLogs } =
@@ -328,6 +328,22 @@ try {
   assertContains(projects, "skill</small>", "scan/project smoke");
   assertContains(projects, "Pull available", "scan/project smoke");
   assertExcludes(projects, "license: LICENSE", "scan/project smoke");
+
+  const importDialog = render(
+    React.createElement(ProjectImportDialog, {
+      directoryName: "",
+      onCancel: noop,
+      onDirectoryNameChange: noop,
+      onShallowChange: noop,
+      onSkillPathChange: noop,
+      onSourceChange: noop,
+      onSubmit: noop,
+      shallow: false,
+      skillPath: "",
+      source: "",
+    }),
+  );
+  assertContains(importDialog, "Skill path", "project import dialog smoke");
 
   const missingAgentWorkspace = {
     ...workspace,

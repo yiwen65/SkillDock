@@ -5,9 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use skilldock_lib::{
     check_all_project_updates_at, check_all_project_updates_background_at,
     check_project_updates_at, check_project_updates_background_at, import_project_at,
-    plan_import_project, pull_all_projects_at, pull_project_at, pull_project_background_at,
-    task_queue, AgentProfile, GitOperationErrorKind, GitStatus, ImportProjectRequest,
-    PullAllProjectsRequest, PullProjectRequest, TaskStatus,
+    import_project_background_at, plan_import_project, pull_all_projects_at, pull_project_at,
+    pull_project_background_at, task_queue, AgentProfile, GitOperationErrorKind, GitStatus,
+    ImportProjectRequest, PullAllProjectsRequest, PullProjectRequest, TaskStatus,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -94,6 +94,16 @@ fn commit_and_push(seed: &Path, file_name: &str, contents: &str) {
     git(seed, &["push"]);
 }
 
+fn add_skill(repo: &Path, relative_path: &str, name: &str) {
+    let skill_dir = repo.join(relative_path);
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: {name} skill\n---\n"),
+    )
+    .unwrap();
+}
+
 #[test]
 fn import_plan_normalizes_github_shorthand_and_rejects_unsafe_directory_names() {
     let workspace = temp_dir("import_plan");
@@ -103,6 +113,7 @@ fn import_plan_normalizes_github_shorthand_and_rejects_unsafe_directory_names() 
             source: "owner/repo".to_string(),
             directory_name: None,
             shallow: false,
+            skill_path: None,
         },
     )
     .unwrap();
@@ -113,6 +124,7 @@ fn import_plan_normalizes_github_shorthand_and_rejects_unsafe_directory_names() 
         plan.target_path,
         workspace.join("repo").display().to_string()
     );
+    assert_eq!(plan.skill_path, None);
 
     for unsafe_name in ["../repo", "nested/repo", ".git", "", "repo\u{0}name"] {
         let error = plan_import_project(
@@ -121,6 +133,7 @@ fn import_plan_normalizes_github_shorthand_and_rejects_unsafe_directory_names() 
                 source: "owner/repo".to_string(),
                 directory_name: Some(unsafe_name.to_string()),
                 shallow: false,
+                skill_path: None,
             },
         )
         .unwrap_err();
@@ -139,11 +152,100 @@ fn import_plan_normalizes_github_shorthand_and_rejects_unsafe_directory_names() 
                 source: source.to_string(),
                 directory_name: Some("safe-name".to_string()),
                 shallow: false,
+                skill_path: None,
             },
         )
         .unwrap();
         assert_eq!(plan.remote_url, source);
     }
+}
+
+#[test]
+fn import_plan_extracts_skill_path_from_github_directory_urls() {
+    let workspace = temp_dir("import_plan_github_tree");
+
+    let plan = plan_import_project(
+        &workspace,
+        &ImportProjectRequest {
+            source: "https://github.com/example/awesome-copilot/tree/main/skills/github-release"
+                .to_string(),
+            directory_name: None,
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.remote_url,
+        "https://github.com/example/awesome-copilot.git"
+    );
+    assert_eq!(plan.directory_name, "awesome-copilot");
+    assert_eq!(plan.skill_path, Some("skills/github-release".to_string()));
+}
+
+#[test]
+fn import_plan_uses_owner_repo_directory_when_repo_name_matches_skill_parent() {
+    let workspace = temp_dir("import_plan_github_repo_named_skills");
+
+    let plan = plan_import_project(
+        &workspace,
+        &ImportProjectRequest {
+            source: "https://github.com/anthropics/skills/tree/main/skills/skill-creator"
+                .to_string(),
+            directory_name: None,
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(plan.remote_url, "https://github.com/anthropics/skills.git");
+    assert_eq!(plan.directory_name, "anthropics-skills");
+    assert_eq!(plan.skill_path, Some("skills/skill-creator".to_string()));
+}
+
+#[test]
+fn import_plan_uses_owner_repo_directory_for_manual_skill_path_when_needed() {
+    let workspace = temp_dir("import_plan_manual_repo_named_skills");
+
+    let plan = plan_import_project(
+        &workspace,
+        &ImportProjectRequest {
+            source: "anthropics/skills".to_string(),
+            directory_name: None,
+            shallow: false,
+            skill_path: Some("skills/skill-creator".to_string()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(plan.remote_url, "https://github.com/anthropics/skills.git");
+    assert_eq!(plan.directory_name, "anthropics-skills");
+    assert_eq!(plan.skill_path, Some("skills/skill-creator".to_string()));
+}
+
+#[test]
+fn import_plan_treats_directory_name_with_slashes_as_skill_path_when_unambiguous() {
+    let workspace = temp_dir("import_plan_misplaced_skill_path");
+
+    let plan = plan_import_project(
+        &workspace,
+        &ImportProjectRequest {
+            source: "example/awesome-copilot".to_string(),
+            directory_name: Some("skills/github-release".to_string()),
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.remote_url,
+        "https://github.com/example/awesome-copilot.git"
+    );
+    assert_eq!(plan.directory_name, "awesome-copilot");
+    assert_eq!(plan.skill_path, Some("skills/github-release".to_string()));
 }
 
 #[test]
@@ -158,6 +260,7 @@ fn import_project_clones_local_repo_and_returns_refreshed_workspace() {
             source: source.display().to_string(),
             directory_name: Some("imported".to_string()),
             shallow: true,
+            skill_path: None,
         },
     )
     .unwrap();
@@ -183,6 +286,7 @@ fn import_project_retries_failed_clone_and_does_not_add_partial_project() {
             source: workspace.join("missing-source.git").display().to_string(),
             directory_name: Some("failed-import".to_string()),
             shallow: false,
+            skill_path: None,
         },
     )
     .unwrap();
@@ -191,11 +295,54 @@ fn import_project_retries_failed_clone_and_does_not_add_partial_project() {
     assert!(result.task.stdout.contains("clone attempt 1/3"));
     assert!(result.task.stdout.contains("clone attempt 3/3"));
     assert!(!workspace.join("failed-import").exists());
+    assert!(!workspace
+        .join(".skilldock/imports")
+        .read_dir()
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false));
     assert!(!result
         .workspace
         .projects
         .iter()
         .any(|project| project.id == "failed-import"));
+}
+
+#[test]
+fn import_project_background_returns_before_clone_finishes() {
+    let workspace = temp_dir("import_background");
+    let source = init_source_repo("import_background_source");
+
+    let result = import_project_background_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("background-import".to_string()),
+            shallow: false,
+            skill_path: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Queued);
+    assert!(!result
+        .workspace
+        .projects
+        .iter()
+        .any(|project| project.id == "background-import"));
+    for _ in 0..50 {
+        let status = task_queue().get_task_status(&result.task.id).unwrap();
+        if matches!(
+            status.status,
+            TaskStatus::Succeeded | TaskStatus::Skipped | TaskStatus::Failed | TaskStatus::Cancelled
+        ) {
+            assert_eq!(status.status, TaskStatus::Succeeded);
+            assert!(workspace.join("background-import/.git").exists());
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("background import did not finish");
 }
 
 #[test]
@@ -212,6 +359,7 @@ fn import_project_adopts_existing_git_directory_and_blocks_plain_directory() {
             source: "https://example.com/existing.git".to_string(),
             directory_name: Some("existing".to_string()),
             shallow: false,
+            skill_path: None,
         },
     )
     .unwrap();
@@ -226,11 +374,235 @@ fn import_project_adopts_existing_git_directory_and_blocks_plain_directory() {
             source: "https://example.com/plain.git".to_string(),
             directory_name: Some("plain".to_string()),
             shallow: false,
+            skill_path: None,
         },
     )
     .unwrap();
     assert_eq!(blocked.task.status, TaskStatus::Failed);
     assert!(blocked.task.error.unwrap().contains("non-Git directory"));
+}
+
+#[test]
+fn import_project_with_skill_path_sparse_checks_out_only_requested_skill() {
+    let workspace = temp_dir("import_sparse_skill");
+    let source = init_source_repo("sparse_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    add_skill(&source, "skills/other", "Other");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skills"]);
+
+    let result = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("sparse-project".to_string()),
+            shallow: false,
+            skill_path: Some("skills/tdd".to_string()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Succeeded);
+    assert!(result
+        .task
+        .stdout
+        .contains("sparse-checkout set --cone skills/tdd"));
+    assert!(workspace
+        .join("sparse-project/skills/tdd/SKILL.md")
+        .is_file());
+    assert!(!workspace
+        .join("sparse-project/skills/other/SKILL.md")
+        .exists());
+    assert!(result
+        .workspace
+        .skills
+        .iter()
+        .any(|skill| skill.id == "sparse-project/skills/tdd"));
+    assert!(!result
+        .workspace
+        .skills
+        .iter()
+        .any(|skill| skill.id == "sparse-project/skills/other"));
+}
+
+#[test]
+fn import_project_rejects_unsafe_skill_paths_before_clone() {
+    let workspace = temp_dir("import_invalid_skill_path");
+
+    for unsafe_path in [
+        "",
+        "/skills/tdd",
+        "../skills/tdd",
+        "skills/../tdd",
+        ".git/hooks",
+        "skills/.git/tdd",
+        "node_modules/tdd",
+        "skills/node_modules/tdd",
+    ] {
+        let error = plan_import_project(
+            &workspace,
+            &ImportProjectRequest {
+                source: "owner/repo".to_string(),
+                directory_name: Some("repo".to_string()),
+                shallow: false,
+                skill_path: Some(unsafe_path.to_string()),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, GitOperationErrorKind::InvalidRepository);
+        assert!(!workspace.join("repo").exists());
+    }
+}
+
+#[test]
+fn import_project_with_missing_skill_path_fails_and_removes_partial_clone() {
+    let workspace = temp_dir("import_sparse_missing");
+    let source = init_source_repo("sparse_missing_source");
+    std::fs::create_dir_all(source.join("skills/not-a-skill")).unwrap();
+    std::fs::write(source.join("skills/not-a-skill/README.md"), "No skill\n").unwrap();
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add non skill"]);
+
+    let result = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("missing-skill".to_string()),
+            shallow: false,
+            skill_path: Some("skills/not-a-skill".to_string()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Failed);
+    assert!(result
+        .task
+        .stderr
+        .contains("does not contain SKILL.md after checkout"));
+    assert!(!workspace.join("missing-skill").exists());
+}
+
+#[test]
+fn import_project_adopts_existing_git_directory_with_checked_out_skill_path() {
+    let workspace = temp_dir("import_existing_sparse_valid");
+    let source = init_source_repo("existing_sparse_valid_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skill"]);
+    clone_project(&source, &workspace, "existing-sparse");
+
+    let result = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("existing-sparse".to_string()),
+            shallow: false,
+            skill_path: Some("skills/tdd".to_string()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Succeeded);
+    assert!(result.task.stdout.contains("adopt existing Git directory"));
+}
+
+#[test]
+fn import_project_adds_missing_skill_path_to_existing_sparse_checkout() {
+    let workspace = temp_dir("import_existing_sparse_add");
+    let source = init_source_repo("existing_sparse_add_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    add_skill(&source, "skills/release", "Release");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skills"]);
+
+    let first = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("existing-sparse-add".to_string()),
+            shallow: false,
+            skill_path: Some("skills/tdd".to_string()),
+        },
+    )
+    .unwrap();
+    assert_eq!(first.task.status, TaskStatus::Succeeded);
+    assert!(!workspace
+        .join("existing-sparse-add/skills/release/SKILL.md")
+        .exists());
+
+    let second = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("existing-sparse-add".to_string()),
+            shallow: false,
+            skill_path: Some("skills/release".to_string()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        second.task.status, TaskStatus::Succeeded,
+        "{}",
+        second.task.stderr
+    );
+    assert!(second
+        .task
+        .stdout
+        .contains("sparse-checkout add skills/release"));
+    assert!(workspace
+        .join("existing-sparse-add/skills/tdd/SKILL.md")
+        .is_file());
+    assert!(workspace
+        .join("existing-sparse-add/skills/release/SKILL.md")
+        .is_file());
+    assert!(second
+        .workspace
+        .skills
+        .iter()
+        .any(|skill| skill.id == "existing-sparse-add/skills/tdd"));
+    assert!(second
+        .workspace
+        .skills
+        .iter()
+        .any(|skill| skill.id == "existing-sparse-add/skills/release"));
+}
+
+#[test]
+fn import_project_blocks_existing_git_directory_when_skill_path_is_missing() {
+    let workspace = temp_dir("import_existing_sparse_missing");
+    let source = init_source_repo("existing_sparse_missing_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skill"]);
+    let existing = clone_project(&source, &workspace, "existing-sparse-missing");
+
+    let result = import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("existing-sparse-missing".to_string()),
+            shallow: false,
+            skill_path: Some("skills/missing".to_string()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Failed);
+    assert!(existing.join(".git").exists());
+    let sparse_config = Command::new("git")
+        .arg("-C")
+        .arg(&existing)
+        .args(["config", "--get", "core.sparseCheckout"])
+        .output()
+        .unwrap();
+    assert!(!sparse_config.status.success());
 }
 
 #[test]

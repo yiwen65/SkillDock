@@ -131,7 +131,10 @@ fn visit_skill_dirs(
         let path = entry.path();
         let file_name = entry.file_name();
 
-        if file_name == OsStr::new(".git") || file_name == OsStr::new("node_modules") {
+        if file_name == OsStr::new(".git")
+            || file_name == OsStr::new(".skilldock")
+            || file_name == OsStr::new("node_modules")
+        {
             continue;
         }
 
