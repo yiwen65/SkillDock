@@ -32,7 +32,6 @@ export function mergeTaskRecords(incoming: TaskRecord[], existing: TaskRecord[])
   if (incoming.length === 0) return existing;
 
   const records = new Map<string, TaskRecord>();
-  let changed = false;
 
   for (const task of incoming) {
     records.set(task.id, task);
@@ -54,7 +53,7 @@ export function mergeTaskRecords(incoming: TaskRecord[], existing: TaskRecord[])
 
   // Return existing reference if nothing actually changed
   if (merged.length === existing.length) {
-    changed = merged.some((task, i) => task !== existing[i]);
+    const changed = merged.some((task, i) => task !== existing[i]);
     if (!changed) return existing;
   }
 
