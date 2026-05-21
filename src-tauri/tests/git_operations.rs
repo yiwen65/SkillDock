@@ -872,7 +872,7 @@ fn check_project_updates_background_returns_before_running_to_completion() {
 }
 
 #[test]
-fn pull_project_skips_dirty_worktree_by_default() {
+fn pull_project_resets_dirty_worktree_to_remote_by_default() {
     let workspace = temp_dir("pull_dirty");
     let (remote, _seed) = init_bare_remote_with_seed("pull_dirty");
     let project = clone_project(&remote, &workspace, "project-one");
@@ -888,13 +888,15 @@ fn pull_project_skips_dirty_worktree_by_default() {
     )
     .unwrap();
 
-    assert_eq!(result.task.status, TaskStatus::Skipped);
-    assert!(result.task.stdout.contains("local changes"));
+    assert_eq!(result.task.status, TaskStatus::Succeeded);
+    assert!(result.task.stdout.contains("reset --hard @{u}"));
+    assert!(result.task.stdout.contains("clean -fd"));
+    assert!(!project.join("local.txt").exists());
     assert!(!result.task.stdout.contains("--autostash"));
 }
 
 #[test]
-fn pull_project_uses_fast_forward_prune_and_refreshes_workspace() {
+fn pull_project_resets_to_remote_and_refreshes_workspace() {
     let workspace = temp_dir("pull_fast_forward");
     let (remote, seed) = init_bare_remote_with_seed("pull_fast_forward");
     let project = clone_project(&remote, &workspace, "project-one");
@@ -911,7 +913,9 @@ fn pull_project_uses_fast_forward_prune_and_refreshes_workspace() {
     .unwrap();
 
     assert_eq!(result.task.status, TaskStatus::Succeeded);
-    assert!(result.task.stdout.contains("pull --ff-only --prune"));
+    assert!(result.task.stdout.contains("fetch --prune"));
+    assert!(result.task.stdout.contains("reset --hard @{u}"));
+    assert!(result.task.stdout.contains("clean -fd"));
     assert!(project.join("CHANGELOG.md").exists());
     let scanned = result
         .workspace
@@ -920,6 +924,190 @@ fn pull_project_uses_fast_forward_prune_and_refreshes_workspace() {
         .find(|project| project.id == "project-one")
         .unwrap();
     assert_eq!(scanned.git_status, GitStatus::UpToDate);
+}
+
+#[test]
+fn pull_project_discards_diverged_local_commits_and_matches_remote() {
+    let workspace = temp_dir("pull_diverged");
+    let (remote, seed) = init_bare_remote_with_seed("pull_diverged");
+    let project = clone_project(&remote, &workspace, "project-one");
+    git(&project, &["config", "user.email", "test@example.com"]);
+    git(&project, &["config", "user.name", "Test User"]);
+    std::fs::write(project.join("local-only.txt"), "local commit\n").unwrap();
+    git(&project, &["add", "local-only.txt"]);
+    git(&project, &["commit", "-m", "local only"]);
+    std::fs::write(project.join("untracked.txt"), "local untracked\n").unwrap();
+    commit_and_push(&seed, "CHANGELOG.md", "remote release\n");
+
+    let result = pull_project_at(
+        &workspace,
+        &[],
+        PullProjectRequest {
+            project_id: "project-one".to_string(),
+            autostash: false,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Succeeded);
+    assert!(project.join("CHANGELOG.md").exists());
+    assert!(!project.join("local-only.txt").exists());
+    assert!(!project.join("untracked.txt").exists());
+    let scanned = result
+        .workspace
+        .projects
+        .iter()
+        .find(|project| project.id == "project-one")
+        .unwrap();
+    assert_eq!(scanned.git_status, GitStatus::UpToDate);
+    assert_eq!(scanned.ahead_count, 0);
+    assert_eq!(scanned.behind_count, 0);
+}
+
+#[test]
+fn pull_project_reapplies_single_catalog_skill_path_for_sparse_import() {
+    let workspace = temp_dir("pull_sparse_single");
+    let source = init_source_repo("pull_sparse_single_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    add_skill(&source, "skills/other", "Other");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skills"]);
+
+    import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("sparse-project".to_string()),
+            shallow: false,
+            skill_path: Some("skills/tdd".to_string()),
+        },
+    )
+    .unwrap();
+    let project = workspace.join("sparse-project");
+    git(&project, &["sparse-checkout", "add", "skills/other"]);
+    assert!(project.join("skills/other/SKILL.md").exists());
+
+    std::fs::write(
+        source.join("skills/tdd/SKILL.md"),
+        "---\nname: TDD v2\ndescription: updated\n---\n",
+    )
+    .unwrap();
+    std::fs::write(
+        source.join("skills/other/SKILL.md"),
+        "---\nname: Other v2\ndescription: updated\n---\n",
+    )
+    .unwrap();
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "update skills"]);
+
+    let result = pull_project_at(
+        &workspace,
+        &[],
+        PullProjectRequest {
+            project_id: "sparse-project".to_string(),
+            autostash: false,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Succeeded);
+    assert!(result
+        .task
+        .stdout
+        .contains("catalog sparse skill paths: skills/tdd"));
+    assert!(result
+        .task
+        .stdout
+        .contains("sparse-checkout set --cone skills/tdd"));
+    assert!(std::fs::read_to_string(project.join("skills/tdd/SKILL.md"))
+        .unwrap()
+        .contains("TDD v2"));
+    assert!(!project.join("skills/other/SKILL.md").exists());
+}
+
+#[test]
+fn pull_project_reapplies_multiple_catalog_skill_paths_for_sparse_import() {
+    let workspace = temp_dir("pull_sparse_multiple");
+    let source = init_source_repo("pull_sparse_multiple_source");
+    add_skill(&source, "skills/tdd", "TDD");
+    add_skill(&source, "skills/release", "Release");
+    add_skill(&source, "skills/other", "Other");
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "add skills"]);
+
+    import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("multi-sparse-project".to_string()),
+            shallow: false,
+            skill_path: Some("skills/tdd".to_string()),
+        },
+    )
+    .unwrap();
+    import_project_at(
+        &workspace,
+        &[],
+        ImportProjectRequest {
+            source: source.display().to_string(),
+            directory_name: Some("multi-sparse-project".to_string()),
+            shallow: false,
+            skill_path: Some("skills/release".to_string()),
+        },
+    )
+    .unwrap();
+    let project = workspace.join("multi-sparse-project");
+    git(&project, &["sparse-checkout", "add", "skills/other"]);
+    assert!(project.join("skills/other/SKILL.md").exists());
+
+    std::fs::write(
+        source.join("skills/tdd/SKILL.md"),
+        "---\nname: TDD v2\ndescription: updated\n---\n",
+    )
+    .unwrap();
+    std::fs::write(
+        source.join("skills/release/SKILL.md"),
+        "---\nname: Release v2\ndescription: updated\n---\n",
+    )
+    .unwrap();
+    std::fs::write(
+        source.join("skills/other/SKILL.md"),
+        "---\nname: Other v2\ndescription: updated\n---\n",
+    )
+    .unwrap();
+    git(&source, &["add", "skills"]);
+    git(&source, &["commit", "-m", "update skills"]);
+
+    let result = pull_project_at(
+        &workspace,
+        &[],
+        PullProjectRequest {
+            project_id: "multi-sparse-project".to_string(),
+            autostash: false,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.task.status, TaskStatus::Succeeded);
+    assert!(result
+        .task
+        .stdout
+        .contains("catalog sparse skill paths: skills/release, skills/tdd"));
+    assert!(result
+        .task
+        .stdout
+        .contains("sparse-checkout set --cone skills/release skills/tdd"));
+    assert!(std::fs::read_to_string(project.join("skills/tdd/SKILL.md"))
+        .unwrap()
+        .contains("TDD v2"));
+    assert!(
+        std::fs::read_to_string(project.join("skills/release/SKILL.md"))
+            .unwrap()
+            .contains("Release v2")
+    );
+    assert!(!project.join("skills/other/SKILL.md").exists());
 }
 
 #[test]
@@ -945,11 +1133,11 @@ fn pull_project_background_returns_before_running_to_completion() {
     assert_eq!(finished.status, TaskStatus::Succeeded);
     assert!(project.join("CHANGELOG.md").exists());
     let logs = task_queue().get_task_logs(&result.task.id).unwrap();
-    assert!(logs.stdout.contains("pull --ff-only --prune"));
+    assert!(logs.stdout.contains("reset --hard @{u}"));
 }
 
 #[test]
-fn pull_all_projects_continues_after_skipped_projects_and_autostash_is_explicit() {
+fn pull_all_projects_resets_dirty_projects_to_remote() {
     let workspace = temp_dir("pull_all");
     let (remote, seed) = init_bare_remote_with_seed("pull_all");
     clone_project(&remote, &workspace, "clean-project");
@@ -971,22 +1159,13 @@ fn pull_all_projects_continues_after_skipped_projects_and_autostash_is_explicit(
     assert!(skipped
         .task
         .stdout
-        .contains("summary: ok=1 skipped=1 failed=0"));
-
-    let autostashed = pull_project_at(
-        &workspace,
-        &[],
-        PullProjectRequest {
-            project_id: "dirty-project".to_string(),
-            autostash: true,
-        },
-    )
-    .unwrap();
-    assert!(autostashed.task.stdout.contains("--autostash"));
+        .contains("summary: ok=2 skipped=0 failed=0"));
+    assert!(!dirty.join("local.txt").exists());
+    assert!(dirty.join("CHANGELOG.md").exists());
 }
 
 #[test]
-fn pull_all_projects_only_attempts_clean_safe_projects() {
+fn pull_all_projects_resets_ahead_and_behind_projects_to_remote() {
     let workspace = temp_dir("pull_all_safe");
     let (behind_remote, behind_seed) = init_bare_remote_with_seed("pull_all_safe_behind");
     let behind = clone_project(&behind_remote, &workspace, "behind-project");
@@ -1017,9 +1196,9 @@ fn pull_all_projects_only_attempts_clean_safe_projects() {
     assert!(result
         .task
         .stdout
-        .contains("summary: ok=1 skipped=1 failed=0"));
-    assert!(result.task.stdout.contains("skip: ahead-project is ahead"));
+        .contains("summary: ok=2 skipped=0 failed=0"));
     assert!(behind.join("CHANGELOG.md").exists());
+    assert!(!ahead.join("local-only.txt").exists());
 }
 
 #[test]

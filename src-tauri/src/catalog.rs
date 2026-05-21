@@ -270,6 +270,21 @@ pub(crate) fn upsert_catalog_project_at(
     Ok(true)
 }
 
+pub(crate) fn catalog_skill_paths_for_project(
+    workspace_root: &Path,
+    project: &Project,
+) -> Result<Vec<String>, CatalogError> {
+    let Some(remote_url) = project.remote_url.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let id = catalog_repository_id(remote_url);
+    Ok(load_catalog_repositories(workspace_root)?
+        .into_iter()
+        .find(|record| record.id == id && matches!(record.state, CatalogRepositoryState::Active))
+        .map(|record| catalog_record_skill_paths(&record))
+        .unwrap_or_default())
+}
+
 fn tombstone_missing_local_catalog_projects(
     workspace_root: &Path,
     workspace: &Workspace,

@@ -608,7 +608,7 @@ fn scan_workspace_maps_git_status_fixtures_without_network_dependencies() {
     );
     assert_eq!(project("ahead").ahead_count, 1);
     assert_eq!(project("ahead").behind_count, 0);
-    assert!(!project("ahead").pull_all_eligible);
+    assert!(project("ahead").pull_all_eligible);
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

@@ -74,8 +74,8 @@ export const ProjectsView = memo(function ProjectsView({
   onCheckProject: (projectId: string) => void;
   onImport: (source: string, directoryName: string, shallow: boolean, skillPath: string) => void;
   onOpenTaskLog: (taskId: string) => void;
-  onPullAll: (autostash: boolean) => void;
-  onPullProject: (projectId: string, autostash: boolean) => void;
+  onPullAll: () => void;
+  onPullProject: (projectId: string) => void;
   onSetProjectHidden: (projectId: string, hidden: boolean) => void;
   onDeleteProject: (projectId: string) => void;
   operationBusy: boolean;
@@ -87,7 +87,6 @@ export const ProjectsView = memo(function ProjectsView({
   const [directoryName, setDirectoryName] = useState("");
   const [skillPath, setSkillPath] = useState("");
   const [shallow, setShallow] = useState(false);
-  const [autostash, setAutostash] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [hiddenFilter, setHiddenFilter] = useState<"visible" | "all" | "hidden">("visible");
@@ -277,19 +276,11 @@ export const ProjectsView = memo(function ProjectsView({
           <button
             className="secondary-button"
             disabled={operationBusy}
-            onClick={() => onPullAll(autostash)}
+            onClick={onPullAll}
             type="button"
           >
-            Pull safe
+            Pull remote
           </button>
-          <label className="inline-check">
-            <input
-              checked={autostash}
-              onChange={(event) => setAutostash(event.target.checked)}
-              type="checkbox"
-            />
-            <span>Autostash</span>
-          </label>
         </div>
         <div className="filter-bar">
           <label>
@@ -379,9 +370,10 @@ export const ProjectsView = memo(function ProjectsView({
                           className="text-button error-link"
                           disabled={rowActionBusy}
                           onClick={() => openTaskLogOnce(projectError.task.id)}
+                          title={projectError.outcome.error || projectError.outcome.summary}
                           type="button"
                         >
-                          {projectError.outcome.error || projectError.outcome.summary}
+                          View latest error
                         </button>
                       )}
                     </div>
@@ -398,7 +390,7 @@ export const ProjectsView = memo(function ProjectsView({
                     <button
                       className="secondary-button"
                       disabled={operationBusy}
-                      onClick={() => onPullProject(project.id, autostash)}
+                      onClick={() => onPullProject(project.id)}
                       type="button"
                     >
                       Pull
