@@ -153,7 +153,7 @@ jobs:
 
       - name: Upload macOS .zip to release
         if: matrix.label == 'macos-universal'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.create-release.outputs.tag }}
           files: ${{ env.ZIP_PATH }}
