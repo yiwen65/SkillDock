@@ -45,8 +45,8 @@ export const CoreView = React.memo(function CoreView({
   onThemePreferenceChange: (theme: "dark" | "light" | "system") => void;
   onTaskChange: (task: TaskRecord) => void;
   onOpenTaskLog: (taskId: string) => void;
-  onPullAll: (autostash: boolean) => void;
-  onPullProject: (projectId: string, autostash: boolean) => void;
+  onPullAll: () => void;
+  onPullProject: (projectId: string) => void;
   onSetProjectHidden: (projectId: string, hidden: boolean) => void;
   onDeleteProject: (projectId: string) => void;
   operationBusy: boolean;

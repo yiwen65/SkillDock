@@ -9,11 +9,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    is_pull_all_eligible, load_user_config, run_workspace_task_background,
-    run_workspace_task_blocking, scan_workspace_at, tombstone_catalog_project_at,
-    upsert_catalog_project_at, AgentProfile, ConfigError, GitStatus, ImportProjectRequest, Project,
-    ProjectTaskRecord, PullAllProjectsRequest, PullProjectRequest, TaskKind, TaskOperationResult,
-    TaskOutcome, TaskRecord, TaskStatus, Workspace, WorkspaceError,
+    catalog_skill_paths_for_project, is_pull_all_eligible, load_user_config,
+    run_workspace_task_background, run_workspace_task_blocking, scan_workspace_at,
+    tombstone_catalog_project_at, upsert_catalog_project_at, AgentProfile, ConfigError, GitStatus,
+    ImportProjectRequest, Project, ProjectTaskRecord, PullAllProjectsRequest, PullProjectRequest,
+    TaskKind, TaskOperationResult, TaskOutcome, TaskRecord, TaskStatus, Workspace, WorkspaceError,
 };
 
 const IMPORT_CLONE_MAX_ATTEMPTS: usize = 3;
@@ -587,7 +587,6 @@ pub fn pull_project_at(
     agent_profiles: &[AgentProfile],
     request: PullProjectRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let autostash = request.autostash;
     run_project_git_task_with_mode(
         workspace_root,
         agent_profiles,
@@ -595,7 +594,7 @@ pub fn pull_project_at(
         format!("Pull {}", request.project_id),
         request.project_id,
         ProjectTaskMode::Blocking,
-        move |project, context| pull_project(project, autostash, context),
+        move |project, context| pull_project(project, context),
     )
 }
 
@@ -604,7 +603,6 @@ pub fn pull_project_background_at(
     agent_profiles: &[AgentProfile],
     request: PullProjectRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let autostash = request.autostash;
     run_project_git_task_with_mode(
         workspace_root,
         agent_profiles,
@@ -612,7 +610,7 @@ pub fn pull_project_background_at(
         format!("Pull {}", request.project_id),
         request.project_id,
         ProjectTaskMode::Background,
-        move |project, context| pull_project(project, autostash, context),
+        move |project, context| pull_project(project, context),
     )
 }
 
@@ -621,7 +619,6 @@ pub fn pull_all_projects_at(
     agent_profiles: &[AgentProfile],
     request: PullAllProjectsRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let autostash = request.autostash;
     let safe_project_ids = request
         .safe_project_ids
         .map(|project_ids| project_ids.into_iter().collect::<HashSet<_>>());
@@ -645,7 +642,7 @@ pub fn pull_all_projects_at(
                     );
                 }
             }
-            pull_safe_project(project, autostash, context)
+            pull_safe_project(project, context)
         },
     )
 }
@@ -655,7 +652,6 @@ pub fn pull_all_projects_background_at(
     agent_profiles: &[AgentProfile],
     request: PullAllProjectsRequest,
 ) -> Result<TaskOperationResult, GitOperationError> {
-    let autostash = request.autostash;
     let safe_project_ids = request
         .safe_project_ids
         .map(|project_ids| project_ids.into_iter().collect::<HashSet<_>>());
@@ -680,7 +676,7 @@ pub fn pull_all_projects_background_at(
                     );
                 }
             }
-            pull_safe_project(project, autostash, context)
+            pull_safe_project(project, context)
         },
     )
 }
@@ -1018,18 +1014,7 @@ fn fetch_project(project: &Project, context: &mut crate::TaskContext) -> Project
     }
 }
 
-fn pull_project(
-    project: &Project,
-    autostash: bool,
-    context: &mut crate::TaskContext,
-) -> ProjectTaskOutcome {
-    if matches!(project.git_status, GitStatus::Dirty) && !autostash {
-        context.stdout(format!(
-            "skip: {} has local changes; use autostash or clean/stash first",
-            project.id
-        ));
-        return project_outcome(project, TaskStatus::Skipped, "dirty working tree", None);
-    }
+fn pull_project(project: &Project, context: &mut crate::TaskContext) -> ProjectTaskOutcome {
     if matches!(project.git_status, GitStatus::Detached) {
         context.stdout(format!("skip: {} is detached", project.id));
         return project_outcome(project, TaskStatus::Skipped, "detached", None);
@@ -1039,34 +1024,89 @@ fn pull_project(
         return project_outcome(project, TaskStatus::Skipped, "no upstream", None);
     }
 
-    let mut args = vec![
-        "pull".to_string(),
-        "--ff-only".to_string(),
-        "--prune".to_string(),
-    ];
-    if autostash {
-        args.push("--autostash".to_string());
-    }
-    context.stdout(format!("git -C {} {}", project.path, args.join(" ")));
-    match git_command_output(Path::new(&project.path), &args) {
+    context.stdout(format!(
+        "remote authoritative pull: {} will be reset to {}",
+        project.id,
+        project.upstream.as_deref().unwrap_or("@{u}")
+    ));
+
+    let project_path = Path::new(&project.path);
+    let fetch_args = vec!["fetch".to_string(), "--prune".to_string()];
+    context.stdout(format!("git -C {} {}", project.path, fetch_args.join(" ")));
+    match git_command_output(project_path, &fetch_args) {
         Ok((stdout, stderr)) => {
             context.stdout(stdout);
             context.stderr(stderr);
-            project_outcome(project, TaskStatus::Succeeded, "pull succeeded", None)
         }
         Err((stdout, stderr)) => {
             context.stdout(stdout);
             context.stderr(&stderr);
-            project_outcome(project, TaskStatus::Failed, "pull failed", None).with_error(stderr)
+            return project_outcome(project, TaskStatus::Failed, "pull failed", None)
+                .with_error(stderr);
         }
     }
+
+    if let Err((stdout, stderr)) = align_sparse_checkout_with_catalog(project, context) {
+        context.stdout(stdout);
+        context.stderr(&stderr);
+        return project_outcome(project, TaskStatus::Failed, "pull failed", None)
+            .with_error(stderr);
+    }
+
+    for args in [
+        vec![
+            "reset".to_string(),
+            "--hard".to_string(),
+            "@{u}".to_string(),
+        ],
+        vec!["clean".to_string(), "-fd".to_string()],
+    ] {
+        context.stdout(format!("git -C {} {}", project.path, args.join(" ")));
+        match git_command_output(project_path, &args) {
+            Ok((stdout, stderr)) => {
+                context.stdout(stdout);
+                context.stderr(stderr);
+            }
+            Err((stdout, stderr)) => {
+                context.stdout(stdout);
+                context.stderr(&stderr);
+                return project_outcome(project, TaskStatus::Failed, "pull failed", None)
+                    .with_error(stderr);
+            }
+        }
+    }
+
+    project_outcome(project, TaskStatus::Succeeded, "pull succeeded", None)
 }
 
-fn pull_safe_project(
+fn align_sparse_checkout_with_catalog(
     project: &Project,
-    autostash: bool,
     context: &mut crate::TaskContext,
-) -> ProjectTaskOutcome {
+) -> Result<(), (String, String)> {
+    let Some(workspace_root) = Path::new(&project.path).parent() else {
+        return Ok(());
+    };
+    let skill_paths = catalog_skill_paths_for_project(workspace_root, project)
+        .map_err(|error| (String::new(), error.message))?;
+    if skill_paths.is_empty() {
+        return Ok(());
+    }
+
+    context.stdout(format!(
+        "catalog sparse skill paths: {}",
+        skill_paths.join(", ")
+    ));
+    let mut args = vec![
+        "sparse-checkout".to_string(),
+        "set".to_string(),
+        "--cone".to_string(),
+    ];
+    args.extend(skill_paths);
+    context.stdout(format!("git -C {} {}", project.path, args.join(" ")));
+    git_command_output(Path::new(&project.path), &args).map(|_| ())
+}
+
+fn pull_safe_project(project: &Project, context: &mut crate::TaskContext) -> ProjectTaskOutcome {
     if !project.pull_all_eligible {
         context.stdout(format!(
             "skip: {} is {} and is not safe for pull-all",
@@ -1076,7 +1116,7 @@ fn pull_safe_project(
         return project_outcome(project, TaskStatus::Skipped, "not safe for pull-all", None);
     }
 
-    pull_project(project, autostash, context)
+    pull_project(project, context)
 }
 
 fn git_status_label(status: &GitStatus) -> &'static str {

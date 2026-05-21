@@ -180,7 +180,15 @@ pub struct PullAllProjectsRequest {
 }
 
 pub fn is_pull_all_eligible(git_status: &GitStatus, upstream: Option<&str>) -> bool {
-    upstream.is_some() && matches!(git_status, GitStatus::Behind | GitStatus::UpToDate)
+    upstream.is_some()
+        && matches!(
+            git_status,
+            GitStatus::UpToDate
+                | GitStatus::Behind
+                | GitStatus::Ahead
+                | GitStatus::Diverged
+                | GitStatus::Dirty
+        )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

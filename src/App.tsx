@@ -53,13 +53,14 @@ const navMeta: Record<ViewName, { icon: "agents" | "logs" | "projects" | "settin
   };
 
 type LoadState =
-  | { status: "loading"; message: string }
+  | { status: "loading"; message: string; workspace?: Workspace }
   | { status: "needs-workspace"; message?: string }
   | { status: "ready"; workspace: Workspace }
   | { status: "error"; message: string; workspace?: Workspace };
 
 function loadStateWorkspaceRoot(state: LoadState) {
   if (state.status === "ready") return state.workspace.root;
+  if (state.status === "loading") return state.workspace?.root ?? null;
   if (state.status === "error") return state.workspace?.root ?? null;
   return null;
 }
@@ -81,13 +82,14 @@ function App() {
   // (Refresh / Open workspace / Recent workspace switch) cannot spawn
   // overlapping scans before the loading state masks them.
   const refreshWorkspaceBusyRef = useRef(false);
+  const [refreshWorkspaceBusy, setRefreshWorkspaceBusy] = useState(false);
   const chooseWorkspaceBusyRef = useRef(false);
   const workspaceRefreshTaskIdsRef = useRef(new Set<string>());
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const readyWorkspace =
     loadState.status === "ready"
       ? loadState.workspace
-      : loadState.status === "error"
+      : loadState.status === "loading" || loadState.status === "error"
         ? loadState.workspace
         : undefined;
   const readyWorkspaceRef = useRef(readyWorkspace);
@@ -264,7 +266,7 @@ function App() {
     }
 
     refreshWorkspaceBusyRef.current = true;
-    setTrackedLoadState({ status: "loading", message: "Scanning workspace" });
+    setRefreshWorkspaceBusy(true);
     try {
       const workspace = await scanWorkspace(readyWorkspace.root);
       setTrackedLoadState({ status: "ready", workspace });
@@ -277,6 +279,7 @@ function App() {
       });
     } finally {
       refreshWorkspaceBusyRef.current = false;
+      setRefreshWorkspaceBusy(false);
     }
   };
 
@@ -355,11 +358,22 @@ function App() {
     if (!isCurrentWorkspaceRoot(result.workspace.root)) {
       return;
     }
+    const workspaceRoot = result.workspace.root;
     setTaskHistory((tasks) => mergeTaskRecords([result.task], tasks));
     setTrackedLoadState({ status: "ready", workspace: result.workspace });
     setOperationMessage(
       `Batch link: ${result.summary.linked} linked, ${result.summary.alreadyInstalled} already installed, ${result.summary.skipped} skipped, ${result.summary.failed} failed.`,
     );
+    void scanWorkspace(workspaceRoot)
+      .then((workspace) => {
+        if (isCurrentWorkspaceRoot(workspaceRoot)) {
+          setTrackedLoadState({ status: "ready", workspace });
+        }
+      })
+      .catch(() => {
+        // The batch result already contains a workspace snapshot; keep it if
+        // this follow-up scan cannot complete.
+      });
   }, []);
 
   const runWorkspaceOperation = async (
@@ -499,10 +513,10 @@ function App() {
   );
 
   const handlePullAll = useCallback(
-    (autostash: boolean) =>
+    () =>
       runWorkspaceOperationRef.current("Pulling projects", (workspace) =>
         pullAllProjects(workspace.root, {
-          autostash,
+          autostash: false,
           safeProjectIds: workspace.projects
             .filter((project) => project.pullAllEligible)
             .map((project) => project.id),
@@ -512,9 +526,9 @@ function App() {
   );
 
   const handlePullProject = useCallback(
-    (projectId: string, autostash: boolean) =>
+    (projectId: string) =>
       runWorkspaceOperationRef.current(`Pulling ${projectId}`, (workspace) =>
-        pullProject(workspace.root, { projectId, autostash }),
+        pullProject(workspace.root, { projectId, autostash: false }),
       ),
     [],
   );
@@ -559,7 +573,12 @@ function App() {
           </div>
           <div className="topbar-actions">
             {readyWorkspace && (
-              <button className="secondary-button" onClick={refreshWorkspace} type="button">
+              <button
+                className="secondary-button"
+                disabled={refreshWorkspaceBusy}
+                onClick={refreshWorkspace}
+                type="button"
+              >
                 <RefreshIcon />
                 Refresh
               </button>
@@ -584,7 +603,7 @@ function App() {
         )}
 
         <section className="content" aria-live="polite">
-          {loadState.status === "loading" && (
+          {loadState.status === "loading" && !readyWorkspace && (
             <StatusPanel title="Loading" body={loadState.message} tone="neutral" />
           )}
           {loadState.status === "needs-workspace" && (
