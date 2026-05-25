@@ -119,6 +119,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Check release version sync
+        run: npm run version:check
+        env:
+          RELEASE_TAG: ${{ needs.create-release.outputs.tag }}
+
       - name: Build and upload bundles
         uses: tauri-apps/tauri-action@v0
         env:

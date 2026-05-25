@@ -1,7 +1,7 @@
 {
   "name": "skilldock",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Local-first Git workspace and symlink installer for AI agent skills across Claude Code, Codex, and custom agents.",
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
@@ -34,6 +34,7 @@
     "tauri:build": "tauri build --features desktop",
     "e2e": "playwright test",
     "ui:smoke": "node scripts/ui-smoke.mjs",
+    "version:check": "node scripts/check-version-sync.mjs",
     "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
