@@ -128,8 +128,7 @@ test("covers project import, update controls, filtering and hide metadata", asyn
   await page.getByRole("button", { name: "Check all" }).click();
   await expect(page.getByText("Checked 3 projects.")).toBeVisible();
 
-  await page.getByLabel("Autostash").check();
-  await page.getByRole("button", { name: "Pull safe" }).click();
+  await page.getByRole("button", { name: "Pull remote" }).click();
   await expect(page.getByText("Pulled 3 eligible projects.")).toBeVisible();
 
   const agentSkillsRow = page.locator(".project-row").filter({ hasText: "Agent Skills" });
