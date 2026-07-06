@@ -125,7 +125,7 @@ jobs:
           RELEASE_TAG: ${{ needs.create-release.outputs.tag }}
 
       - name: Build and upload bundles
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS codesign + notarize and Tauri updater signing are opt-in.
