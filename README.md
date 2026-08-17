@@ -1,3 +1,5 @@
+
+
 <div align="center">
   <img src="public/app-icon.png" alt="SkillDock" width="128" height="128" />
   <h1>SkillDock</h1>
@@ -88,7 +90,7 @@ Deliberate **non-goals**: GitHub search / recommendation marketplace, skill edit
 | Layer    | Choice                                              |
 | -------- | --------------------------------------------------- |
 | Shell    | [Tauri 2](https://tauri.app/)                       |
-| Frontend | React 18 + TypeScript + Vite 5                      |
+| Frontend | React 19 + TypeScript 6 + Vite 8                    |
 | Backend  | Rust (Tauri commands)                               |
 | Git      | Shells out to the system `git`, **not** via libgit2 |
 | Testing  | Playwright (E2E) + `cargo test` (Rust)              |
